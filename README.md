@@ -1,7 +1,7 @@
 <div align="center">
     <img src="./app/src/main/ic_launcher-playstore.png" width="128" height="128" style="display: block; margin: 0 auto"/>
-    <h1>ViTune</h1>
-    <p>An Android application for seamless music streaming</p>
+    <h1>RMusic</h1>
+    <p>Project de reproductor de música</p>
 </div>
 
 ---
@@ -30,7 +30,7 @@
 - Highly customizable (dynamic theme, Material You, ...)
 - Normalize audio for the perfect listening experience
 - Listen from your car using Android Auto
-- Open YouTube/YouTube Music links (`watch`, `playlist`, `channel`, etc.) with ViTune
+- Open YouTube/YouTube Music links (`watch`, `playlist`, `channel`, etc.) with RMusic
 - Ridiculously lightweight APK
 
 ## Installation

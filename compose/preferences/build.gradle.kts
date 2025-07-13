@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "app.vitune.compose.preferences"
+    namespace = "com.rmusic.compose.preferences"
     compileSdk = 36
 
     defaultConfig {

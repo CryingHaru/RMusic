@@ -11,3 +11,6 @@ build
 local.properties
 
 .kotlin
+/.github
+/.github
+.github/ISSUE_TEMPLATE/bug_report.yaml

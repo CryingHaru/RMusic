@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "app.vitune.compose.persist"
+    namespace = "com.rmusic.compose.persist"
     compileSdk = 36
 
     defaultConfig {

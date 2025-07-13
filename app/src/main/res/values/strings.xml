@@ -377,4 +377,8 @@
         <item quantity="one">%1$d song</item>
         <item quantity="other">%1$d songs</item>
     </plurals>
+    <string name="asset_statements" translatable="false">
+[{"include": "https://signin.example.com/.well-known/assetlinks.json"}]
+</string>
+    <string name="playback_error">Error de reproducción: %1$s</string>
 </resources>

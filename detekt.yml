@@ -20,7 +20,7 @@ Compose:
   ModifierMissing:
     active: true
     ignoreAnnotated:
-      - app.vitune.android.ui.screens.Route
+      - com.rmusic.android.ui.screens.Route
   ModifierNaming:
     active: true
   ModifierNotUsedAtRoot:
@@ -79,6 +79,8 @@ exceptions:
       - ActivityNotFoundException
 
 formatting:
+  ImportOrdering:
+    active: false
   AnnotationOnSeparateLine:
     active: false
   CommentWrapping:

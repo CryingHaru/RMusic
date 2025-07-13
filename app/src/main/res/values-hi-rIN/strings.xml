@@ -254,7 +254,7 @@
     <string name="ignoring_battery_optimizations">प्रतिबंध पहले ही हटा लिया गया है</string>
     <string name="ignore_battery_optimizations_action">पृष्ठभूमि प्रतिबंध अक्षम करें</string>
     <string name="invincible_service">अजेय सेवा</string>
-    <string name="invincible_service_description">यदि बैटरी अनुकूलन को बंद करना पर्याप्त न हो तो प्लेबैक को 99.99% समय तक चालू रखना चाहिए</string>
+    <string name="invincible_service_description">यदि बैटरी अनुकूलन को बंद करना पर्याप्त न हो तो प्लेबैक को 99.99%% समय तक चालू रखना चाहिए</string>
     <string name="need_help">मदद की ज़रूरत है?</string>
     <string name="need_help_description">अधिकांश समय, यह डेवलपर की गलती नहीं होती है (अजेय सेवा चालू करने के बाद भी) कि ऐप पृष्ठभूमि में ठीक से काम करना बंद कर देता है।\nजांचें कि क्या आपका डिवाइस निर्माता आपके ऐप्स को बंद करता है (रीडायरेक्ट करने के लिए क्लिक करें)</string>
     <string name="service_lifetime_report_issue">यदि आपको सचमुच लगता है कि ऐप में ही कुछ गड़बड़ है, तो के बारे में टैब पर जाएं</string>

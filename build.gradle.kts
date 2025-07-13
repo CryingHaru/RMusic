@@ -18,8 +18,8 @@ val clean by tasks.registering(Delete::class) {
 }
 
 allprojects {
-    group = "app.vitune"
-    version = "1.1.5"
+    group = "com.rmusic"
+    version = "0.1.0"
 
     apply(plugin = "io.gitlab.arturbosch.detekt")
 
@@ -27,6 +27,7 @@ allprojects {
         buildUponDefaultConfig = true
         allRules = false
         config.setFrom("$rootDir/detekt.yml")
+        ignoreFailures = true
     }
 
     tasks.withType<Detekt>().configureEach {

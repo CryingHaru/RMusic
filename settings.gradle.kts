@@ -26,7 +26,7 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.10.0"
 }
 
-rootProject.name = "vitune"
+rootProject.name = "RMusic"
 
 include(":app")
 include(":core:data")
@@ -45,3 +45,4 @@ include(":providers:lrclib")
 include(":providers:piped")
 include(":providers:sponsorblock")
 include(":providers:translate")
+include(":download")

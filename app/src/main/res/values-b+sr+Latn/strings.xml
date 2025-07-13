@@ -249,7 +249,7 @@
     <string name="ignoring_battery_optimizations">Ograničenje je već uklonjeno</string>
     <string name="ignore_battery_optimizations_action">Onemogući ograničenja u pozadini</string>
     <string name="invincible_service">Neuništivi servis</string>
-    <string name="invincible_service_description">Treba da nastavi reprodukciju 99.99% vremena, u slučaju da isključivanje optimizacija baterije nije dovoljno</string>
+    <string name="invincible_service_description">Treba da nastavi reprodukciju 99.99%% vremena, u slučaju da isključivanje optimizacija baterije nije dovoljno</string>
     <string name="need_help">Treba vam pomoć?</string>
     <string name="need_help_description">Većinu vremena, nije krivica programera (čak ni kada uključite neuništivi servis) što aplikacija prestane da radi ispravno u pozadini. Proverite da li proizvođač vašeg uređaja ubija vaše aplikacije (kliknite za preusmerenje)</string>
     <string name="service_lifetime_report_issue">Ako stvarno mislite da nešto nije u redu sa samom aplikacijom, idite na karticu O aplikaciji</string>

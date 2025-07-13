@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "app.vitune.core.data"
+    namespace = "com.rmusic.core.data"
     compileSdk = 36
 
     defaultConfig {
