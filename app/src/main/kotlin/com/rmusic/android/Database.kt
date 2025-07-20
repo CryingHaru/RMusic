@@ -32,6 +32,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteQuery
+import com.rmusic.android.models.DownloadedSong
 import com.rmusic.android.models.Album
 import com.rmusic.android.models.Artist
 import com.rmusic.android.models.Event
@@ -58,6 +59,9 @@ import com.rmusic.core.data.enums.PlaylistSortBy
 import com.rmusic.core.data.enums.SongSortBy
 import com.rmusic.core.data.enums.SortOrder
 import com.rmusic.core.ui.utils.songBundle
+import com.rmusic.download.DownloadStateConverter
+import com.rmusic.download.dao.DownloadDao
+import com.rmusic.download.models.DownloadItem
 import io.ktor.http.Url
 import kotlinx.coroutines.flow.Flow
 
@@ -70,6 +74,33 @@ interface Database {
     @Query("SELECT * FROM Song WHERE id NOT LIKE '$LOCAL_KEY_PREFIX%' ORDER BY ROWID ASC")
     @RewriteQueriesToDropUnusedColumns
     fun songsByRowIdAsc(): Flow<List<Song>>
+
+    // Downloaded songs queries
+    @Transaction
+    @Query("SELECT * FROM DownloadedSong ORDER BY downloadedAt DESC")
+    fun downloadedSongs(): Flow<List<DownloadedSong>>
+
+    @Transaction
+    @Query("SELECT * FROM DownloadedSong WHERE artistsText = :artist ORDER BY albumTitle, title")
+    fun downloadedSongsByArtist(artist: String): Flow<List<DownloadedSong>>
+
+    @Transaction
+    @Query("SELECT DISTINCT artistsText FROM DownloadedSong WHERE artistsText IS NOT NULL ORDER BY artistsText")
+    fun downloadedArtists(): Flow<List<String>>
+
+    @Transaction
+    @Query("SELECT DISTINCT albumTitle FROM DownloadedSong WHERE artistsText = :artist AND albumTitle IS NOT NULL ORDER BY albumTitle")
+    fun downloadedAlbumsByArtist(artist: String): Flow<List<String>>
+
+    @Transaction
+    @Query("SELECT * FROM DownloadedSong WHERE artistsText = :artist AND albumTitle = :album ORDER BY title")
+    fun downloadedSongsByArtistAndAlbum(artist: String, album: String): Flow<List<DownloadedSong>>
+
+    @Query("SELECT COUNT(*) FROM DownloadedSong")
+    fun downloadedSongsCount(): Flow<Int>
+
+    @Query("SELECT SUM(fileSize) FROM DownloadedSong")
+    fun totalDownloadedSize(): Flow<Long?>
 
     @Transaction
     @Query("SELECT * FROM Song WHERE id NOT LIKE '$LOCAL_KEY_PREFIX%' ORDER BY ROWID DESC")
@@ -665,8 +696,11 @@ interface Database {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     fun insert(songArtistMap: SongArtistMap): Long
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun insert(song: Song): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun insert(downloadedSong: DownloadedSong): Long
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     fun insert(queuedMediaItems: List<QueuedMediaItem>)
@@ -746,6 +780,9 @@ interface Database {
     fun delete(song: Song)
 
     @Delete
+    fun delete(downloadedSong: DownloadedSong)
+
+    @Delete
     fun delete(searchQuery: SearchQuery)
 
     @Delete
@@ -768,6 +805,7 @@ interface Database {
 @androidx.room.Database(
     entities = [
         Song::class,
+        DownloadedSong::class,
         SongPlaylistMap::class,
         Playlist::class,
         Artist::class,
@@ -779,10 +817,11 @@ interface Database {
         Format::class,
         Event::class,
         Lyrics::class,
-        PipedSession::class
+        PipedSession::class,
+        DownloadItem::class
     ],
     views = [SortedSongPlaylistMap::class],
-    version = 30,
+    version = 32,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -809,12 +848,15 @@ interface Database {
         AutoMigration(from = 26, to = 27),
         AutoMigration(from = 27, to = 28),
         AutoMigration(from = 28, to = 29),
-        AutoMigration(from = 29, to = 30)
+        AutoMigration(from = 29, to = 30),
+        AutoMigration(from = 30, to = 31),
+        AutoMigration(from = 31, to = 32)
     ]
 )
-@TypeConverters(Converters::class)
+@TypeConverters(Converters::class, DownloadStateConverter::class)
 abstract class DatabaseInitializer protected constructor() : RoomDatabase() {
     abstract val database: Database
+    abstract val downloadDao: DownloadDao
 
     companion object {
         @Volatile

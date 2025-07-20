@@ -36,4 +36,9 @@ allprojects {
             html.required = true
         }
     }
+
+    dependencies {
+        detektPlugins("io.nlopez.compose.rules:detekt:0.4.5")
+        detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.8")
+    }
 }

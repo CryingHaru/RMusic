@@ -27,10 +27,12 @@ detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 
 [libraries]
 core_ktx = { module = "androidx.core:core-ktx", version = "1.16.0" }
+annotation = { module = "androidx.annotation:annotation", version = "1.8.2" }
 
 kotlin_coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version = "1.10.1" }
 kotlin_datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version = "0.6.2" }
 kotlin_immutable = { module = "org.jetbrains.kotlinx:kotlinx-collections-immutable", version = "0.3.8" }
+kotlin_serialization_json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version = "1.7.3" }
 
 compose_bom = { module = "androidx.compose:compose-bom", version = "2025.04.01" }
 compose_animation = { module = "androidx.compose.animation:animation" }
@@ -71,6 +73,8 @@ ktor_client_logging = { module = "io.ktor:ktor-client-logging", version.ref = "k
 ktor_client_encoding = { module = "io.ktor:ktor-client-encoding", version.ref = "ktor" }
 ktor_client_serialization = { module = "io.ktor:ktor-client-serialization", version.ref = "ktor" }
 ktor_serialization_json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
+
+okhttp = { module = "com.squareup.okhttp3:okhttp", version = "4.12.0" }
 
 rhino = { module = "org.mozilla:rhino", version = "1.7.15" }
 log4j = { module = "org.apache.logging.log4j:log4j-api", version = "2.3" }

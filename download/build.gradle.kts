@@ -1,6 +1,6 @@
 plugins {
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
@@ -13,34 +13,30 @@ android {
         minSdk = 21
     }
 
-    sourceSets.all {
-        kotlin.srcDir("src/$name/kotlin")
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_23
+        targetCompatibility = JavaVersion.VERSION_23
     }
-}
-
-kotlin {
-    jvmToolchain(libs.versions.jvm.get().toInt())
-
-    compilerOptions {
-        freeCompilerArgs.addAll(
-            "-Xcontext-receivers",
-            "-Xsuppress-warning=CONTEXT_RECEIVERS_DEPRECATED"
-        )
+    kotlinOptions {
+        jvmTarget = "23"
+        freeCompilerArgs += "-Xcontext-receivers"
     }
 }
 
 dependencies {
+    implementation(projects.core.data)
     implementation(projects.providers.common)
-    implementation(projects.ktorClientBrotli)
+    
+    implementation(libs.kotlin.coroutines)
+    implementation(libs.kotlin.serialization.json)
     implementation(libs.ktor.client.core)
-    implementation(libs.ktor.client.okhttp)
-    implementation(libs.ktor.client.content.negotiation)
-    implementation(libs.ktor.client.encoding)
-    implementation(libs.ktor.client.serialization)
-    implementation(libs.ktor.serialization.json)
-    implementation(libs.kotlinx.coroutines)
-    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.annotation)
+    
+    implementation(libs.workmanager.ktx)
     implementation(libs.room)
-    ksp(libs.room_compiler)
-    implementation(libs.workmanager_ktx)
+    ksp(libs.room.compiler)
+    
+    // For downloading files
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.okhttp)
 }

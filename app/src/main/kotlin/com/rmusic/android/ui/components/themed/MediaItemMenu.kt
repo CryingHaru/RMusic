@@ -1,4 +1,5 @@
 package com.rmusic.android.ui.components.themed
+import androidx.media3.common.MediaItem
 
 import android.content.Intent
 import androidx.activity.compose.BackHandler
@@ -51,7 +52,8 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.media3.common.MediaItem
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import com.rmusic.android.Database
 import com.rmusic.android.LocalPlayerServiceBinder
 import com.rmusic.android.R
@@ -60,7 +62,7 @@ import com.rmusic.android.models.Playlist
 import com.rmusic.android.models.Song
 import com.rmusic.android.models.SongPlaylistMap
 import com.rmusic.android.query
-import com.rmusic.android.service.PrecacheService
+import com.rmusic.android.service.MusicDownloadService
 import com.rmusic.android.service.isLocal
 import com.rmusic.android.transaction
 import com.rmusic.android.ui.items.SongItem
@@ -72,7 +74,7 @@ import com.rmusic.android.utils.asMediaItem
 import com.rmusic.android.utils.enqueue
 import com.rmusic.android.utils.forcePlay
 import com.rmusic.android.utils.formatAsDuration
-import com.rmusic.android.utils.isCached
+import com.rmusic.android.utils.isDownloaded
 import com.rmusic.android.utils.launchYouTubeMusic
 import com.rmusic.android.utils.medium
 import com.rmusic.android.utils.semiBold
@@ -85,7 +87,10 @@ import com.rmusic.core.ui.favoritesIcon
 import com.rmusic.core.ui.utils.px
 import com.rmusic.core.ui.utils.roundedShape
 import com.rmusic.core.ui.utils.songBundle
+import com.rmusic.providers.innertube.Innertube
+import com.rmusic.providers.innertube.models.bodies.PlayerBody
 import com.rmusic.providers.innertube.models.NavigationEndpoint
+import com.rmusic.providers.innertube.requests.player
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -723,17 +728,70 @@ fun MediaItemMenu(
                 }
             }
 
-            if (!isLocal && !isCached(mediaItem.mediaId)) MenuEntry(
+            if (!isLocal && !isDownloaded(mediaItem.mediaId)) MenuEntry(
                 icon = R.drawable.download,
-                text = stringResource(R.string.pre_cache),
+                text = stringResource(R.string.download),
                 onClick = {
                     onDismiss()
-                    runCatching {
-                        PrecacheService.scheduleCache(
-                            context = context.applicationContext,
-                            mediaItem = mediaItem
-                        )
-                    }.exceptionOrNull()?.printStackTrace()
+                    
+                    // Launch coroutine to resolve URL and start download
+                    val scope = context as? androidx.lifecycle.LifecycleOwner
+                        ?: return@MenuEntry
+                    
+                    scope.lifecycleScope.launch {
+                        try {
+                            // Resolve the streaming URL
+                            val videoId = mediaItem.mediaId.removePrefix("https://youtube.com/watch?v=")
+                            val playerResponse = Innertube.player(
+                                PlayerBody(videoId = videoId)
+                            )?.getOrNull()
+                            
+                            val streamingUrl = playerResponse?.streamingData?.adaptiveFormats
+                                ?.filter { it.mimeType?.startsWith("audio/") == true }
+                                ?.maxByOrNull { it.bitrate ?: 0 }
+                                ?.url
+                            
+                            if (streamingUrl != null) {
+                                val extras = mediaItem.mediaMetadata.extras?.songBundle
+                                MusicDownloadService.download(
+                                    context = context.applicationContext,
+                                    trackId = mediaItem.mediaId,
+                                    title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown",
+                                    artist = mediaItem.mediaMetadata.artist?.toString(),
+                                    album = mediaItem.mediaMetadata.albumTitle?.toString(),
+                                    thumbnailUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
+                                    duration = extras?.durationText?.let { 
+                                        // Try to parse duration from text (MM:SS format)
+                                        try {
+                                            val parts = it.split(":")
+                                            if (parts.size == 2) {
+                                                val minutes = parts[0].toLongOrNull() ?: 0
+                                                val seconds = parts[1].toLongOrNull() ?: 0
+                                                (minutes * 60 + seconds) * 1000
+                                            } else 0L
+                                        } catch (e: Exception) {
+                                            0L
+                                        }
+                                    },
+                                    url = streamingUrl
+                                )
+                                
+                                // Show toast to indicate download started
+                                withContext(Dispatchers.Main) {
+                                    context.toast("Download started")
+                                }
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    context.toast("Unable to get download URL")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            withContext(Dispatchers.Main) {
+                                context.toast("Download failed: ${e.message}")
+                            }
+                        }
+                    }
                 }
             )
 

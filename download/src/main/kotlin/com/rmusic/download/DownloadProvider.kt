@@ -1,23 +1,23 @@
 package com.rmusic.download
 
 import kotlinx.coroutines.flow.Flow
+import com.rmusic.download.DownloadState
+import com.rmusic.download.models.DownloadItem
 
 /**
- * Interfaz común para los proveedores de descarga.
+ * Defines the interface for download providers used by DownloadManager.
  */
 interface DownloadProvider {
-    /**
-     * Inicia la descarga de una pista y emite el estado de progreso.
-     * @param trackId identificador único de la pista.
-     */
-    fun downloadTrack(trackId: String): Flow<DownloadState>
+    suspend fun downloadTrack(
+        trackId: String,
+        outputDir: String,
+        filename: String?
+    ): Flow<DownloadState>
 
-    /** Pausa la descarga en curso. */
-    suspend fun pauseDownload(id: String)
+    suspend fun pauseDownload(downloadId: String): Result<Unit>
+    suspend fun resumeDownload(downloadId: String): Result<Unit>
+    suspend fun cancelDownload(downloadId: String): Result<Unit>
 
-    /** Reanuda una descarga pausada. */
-    suspend fun resumeDownload(id: String)
-
-    /** Cancela la descarga. */
-    suspend fun cancelDownload(id: String)
+    fun getDownloadState(downloadId: String): Flow<DownloadState>
+    fun getAllDownloads(): Flow<List<DownloadItem>>
 }

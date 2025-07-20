@@ -198,6 +198,58 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     private lateinit var cache: Cache
     private lateinit var player: ExoPlayer
 
+    /**
+     * Sistema de caché temporal inteligente
+     * Solo mantiene en caché la canción actual y la siguiente
+     */
+    private class TemporalSmartCache {
+        private var currentSongId: String? = null
+        private var nextSongId: String? = null
+        private val cachedItems = mutableSetOf<String>()
+
+        fun updateCurrentAndNext(current: String?, next: String?, cache: Cache) {
+            // Limpiar items que ya no son relevantes
+            val itemsToRemove = cachedItems.filter { 
+                it != current && it != next && !it.startsWith(LOCAL_KEY_PREFIX)
+            }
+            itemsToRemove.forEach { songId ->
+                try {
+                    cache.removeResource(songId)
+                    cachedItems.remove(songId)
+                } catch (e: Exception) {
+                    // Ignorar errores de limpieza
+                }
+            }
+
+            // Actualizar referencias
+            currentSongId = current
+            nextSongId = next
+            
+            // Marcar como cacheados los items actuales
+            current?.let { cachedItems.add(it) }
+            next?.let { cachedItems.add(it) }
+        }
+
+        fun clearAll(cache: Cache) {
+            cachedItems.filter { !it.startsWith(LOCAL_KEY_PREFIX) }.forEach { songId ->
+                try {
+                    cache.removeResource(songId)
+                } catch (e: Exception) {
+                    // Ignorar errores de limpieza
+                }
+            }
+            cachedItems.clear()
+            currentSongId = null
+            nextSongId = null
+        }
+
+        fun isRelevant(songId: String): Boolean {
+            return songId == currentSongId || songId == nextSongId || songId.startsWith(LOCAL_KEY_PREFIX)
+        }
+    }
+
+    private val temporalCache = TemporalSmartCache()
+
     private val defaultActions =
         PlaybackState.ACTION_PLAY or
             PlaybackState.ACTION_PAUSE or
@@ -433,6 +485,9 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         runCatching {
             maybeSavePlayerQueue()
 
+            // Limpiar caché temporal al cerrar
+            temporalCache.clearAll(cache)
+
             player.removeListener(this)
             player.stop()
             player.release()
@@ -503,6 +558,9 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
         mediaItemState.update { mediaItem }
 
+        // Actualizar caché temporal inteligente
+        updateTemporalCache()
+
         maybeRecoverPlaybackError()
         maybeNormalizeVolume()
         maybeProcessRadio()
@@ -522,6 +580,8 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         if (reason != Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) return
         updateMediaSessionQueue(timeline)
         maybeSavePlayerQueue()
+        // Actualizar caché temporal cuando cambie la playlist
+        updateTemporalCache()
     }
 
     override fun onPlayerError(error: PlaybackException) {
@@ -557,6 +617,28 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                     } ?: getString(R.string.skip_on_error_notification_unknown_song)
                 )
                 .setContentTitle(getString(R.string.skip_on_error))
+        }
+    }
+
+    /**
+     * Actualiza el caché temporal para mantener solo la canción actual y la siguiente
+     */
+    private fun updateTemporalCache() {
+        try {
+            val currentIndex = player.currentMediaItemIndex
+            val currentItem = player.currentMediaItem
+            val nextItem = if (currentIndex + 1 < player.mediaItemCount) {
+                player.getMediaItemAt(currentIndex + 1)
+            } else null
+
+            temporalCache.updateCurrentAndNext(
+                current = currentItem?.mediaId,
+                next = nextItem?.mediaId,
+                cache = cache
+            )
+        } catch (e: Exception) {
+            // Ignorar errores del caché temporal
+            Log.w(TAG, "Error updating temporal cache", e)
         }
     }
 

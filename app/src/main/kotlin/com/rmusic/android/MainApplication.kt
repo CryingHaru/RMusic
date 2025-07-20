@@ -69,7 +69,7 @@ import com.rmusic.android.preferences.AppearancePreferences
 import com.rmusic.android.preferences.DataPreferences
 import com.rmusic.android.service.PlayerService
 import com.rmusic.android.service.ServiceNotifications
-import com.rmusic.android.service.downloadState
+import com.rmusic.android.service.downloadState as musicDownloadState
 import com.rmusic.android.ui.components.BottomSheetMenu
 import com.rmusic.android.ui.components.rememberBottomSheetState
 import com.rmusic.android.ui.components.themed.LinearProgressIndicator
@@ -302,7 +302,7 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
                 ) else CompositionLocalProvider(
                     LocalPlayerAwareWindowInsets provides playerAwareWindowInsets
                 ) {
-                    val isDownloading by downloadState.collectAsState()
+                    val isDownloading by musicDownloadState.collectAsState()
 
                     Box {
                         HomeScreen()

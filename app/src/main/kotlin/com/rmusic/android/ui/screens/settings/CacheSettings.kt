@@ -147,11 +147,5 @@ fun CacheSettings() = with(DataPreferences) {
                 )
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
-        // Botón para ir a la pantalla de descargas
-        com.rmusic.android.ui.screens.downloadRoute.let { /* placeholder to force import */ }
-        Button(onClick = { downloadRoute() }, modifier = Modifier.fillMaxWidth()) {
-            Text(text = stringResource(R.string.manage_downloads))
-        }
     }
 }

@@ -128,6 +128,7 @@ dependencies {
     implementation(projects.compose.preferences)
     implementation(projects.compose.routing)
     implementation(projects.compose.reordering)
+    implementation(projects.download)
 
     implementation(fileTree(projectDir.resolve("vendor")))
 
@@ -169,6 +170,9 @@ dependencies {
     implementation(libs.slf4j)
     implementation(libs.logback)
 
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+
     implementation(projects.providers.github)
     implementation(projects.providers.innertube)
     implementation(projects.providers.kugou)
@@ -176,7 +180,7 @@ dependencies {
     implementation(projects.providers.piped)
     implementation(projects.providers.sponsorblock)
     implementation(projects.providers.translate)
+    implementation(projects.download)
     implementation(projects.core.data)
     implementation(projects.core.ui)
-    implementation(projects.download)
 }

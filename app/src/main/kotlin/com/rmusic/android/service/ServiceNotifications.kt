@@ -29,7 +29,7 @@ abstract class NotificationChannels {
     @OptIn(UnstableApi::class)
     inner class Channel internal constructor(
         val id: String,
-        @StringRes
+        @param:StringRes
         val description: Int,
         val notificationId: Int? = null,
         val importance: @Importance Int,
@@ -157,8 +157,8 @@ object ServiceNotifications : NotificationChannels() {
     )
 
     val download by channel(
-        description = R.string.pre_cache,
-        importance = NotificationManagerCompat.IMPORTANCE_LOW,
+        description = R.string.download_notifications,
+        importance = NotificationManagerCompat.IMPORTANCE_DEFAULT,
         singleNotification = true
     )
 

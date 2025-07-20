@@ -31,7 +31,7 @@ import com.rmusic.android.models.Format
 import com.rmusic.android.service.LOCAL_KEY_PREFIX
 import com.rmusic.android.service.PlayerService
 import com.rmusic.android.service.PrecacheService
-import com.rmusic.android.service.downloadState
+import com.rmusic.android.service.downloadState as musicDownloadState
 import com.rmusic.android.ui.components.themed.CircularProgressIndicator
 import com.rmusic.android.ui.components.themed.HeaderIconButton
 import com.rmusic.core.ui.LocalAppearance
@@ -49,7 +49,7 @@ fun PlaylistDownloadIcon(
     val context = LocalContext.current
     val (colorPalette) = LocalAppearance.current
 
-    val isDownloading by downloadState.collectAsState()
+    val isDownloading by musicDownloadState.collectAsState()
 
     AnimatedContent(
         targetState = isDownloading,

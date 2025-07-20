@@ -56,6 +56,13 @@ object Innertube {
         }
     }
 
+    /**
+     * Creates a download provider that can handle YouTube Music downloads
+     */
+    fun createDownloadProvider(): InnertubeDownloadProvider {
+        return InnertubeDownloadProvider(this)
+    }
+
     val logger: Logger = LoggerFactory.getLogger(Innertube::class.java)
     val baseClient = HttpClient(OkHttp) {
         expectSuccess = true

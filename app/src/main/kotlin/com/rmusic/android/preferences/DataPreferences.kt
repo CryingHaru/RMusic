@@ -27,6 +27,11 @@ object DataPreferences : GlobalPreferencesHolder() {
     var shouldCacheQuickPicks by boolean(true)
     var cachedQuickPicks by json(Innertube.RelatedPage())
     var autoSyncPlaylists by boolean(true)
+    
+    // Download preferences
+    var wifiOnlyDownloads by boolean(true)
+    var organizeDownloadsByArtist by boolean(true)
+    var downloadQuality by enum(DownloadQuality.High)
 
     enum class TopListPeriod(
         val displayName: @Composable () -> String,
@@ -52,5 +57,14 @@ object DataPreferences : GlobalPreferencesHolder() {
         Hourly(displayName = { stringResource(R.string.hourly) }, period = 1.hours),
         Daily(displayName = { stringResource(R.string.daily) }, period = 1.days),
         Weekly(displayName = { stringResource(R.string.weekly) }, period = 7.days)
+    }
+    
+    enum class DownloadQuality(
+        val displayName: @Composable () -> String,
+        val bitrate: Int
+    ) {
+        Low(displayName = { stringResource(R.string.low_quality) }, bitrate = 128),
+        Medium(displayName = { stringResource(R.string.medium_quality) }, bitrate = 192),
+        High(displayName = { stringResource(R.string.high_quality) }, bitrate = 320)
     }
 }

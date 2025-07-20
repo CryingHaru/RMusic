@@ -234,52 +234,73 @@ fun HomeSongs(
                 items = filteredItems,
                 key = { song -> song.id }
             ) { song ->
-                if (hidingSong == song.id) HideSongDialog(
-                    song = song,
-                    onDismiss = { hidingSong = null },
-                    onConfirm = {
-                        hidingSong = null
-                        menuState.hide()
+                if (hidingSong == song.id) {
+                    HideSongDialog(
+                        song = song,
+                        onDismiss = { hidingSong = null },
+                        onConfirm = {
+                            hidingSong = null
+                            menuState.hide()
+                        }
+                    )
+                }
+
+                val onLongClickAction = remember(song.id) {
+                    {
+                        keyboardController?.hide()
+                        menuState.display {
+                            InHistoryMediaItemMenu(
+                                song = song,
+                                onDismiss = menuState::hide,
+                                onHideFromDatabase = { hidingSong = song.id }
+                            )
+                        }
                     }
-                )
+                }
+
+                val onClickAction = remember(song.id, items) {
+                    {
+                        keyboardController?.hide()
+                        binder?.stopRadio()
+                        binder?.player?.forcePlayAtIndex(
+                            items.map(Song::asMediaItem),
+                            items.indexOf(song)
+                        )
+                        Unit
+                    }
+                }
+
+                val swipeAction: suspend (kotlinx.coroutines.Job) -> Unit = remember(song.id, filteredItems) {
+                    { animationJob ->
+                        if (AppearancePreferences.swipeToHideSongConfirm) {
+                            hidingSong = song.id
+                        } else {
+                            // Solo eliminar de la base de datos, no del cache temporal
+                            transaction { Database.delete(song) }
+                        }
+                        animationJob.join()
+                    }
+                }
+
+                val baseModifier = Modifier
+                    .combinedClickable(
+                        onLongClick = onLongClickAction,
+                        onClick = onClickAction
+                    )
+                    .animateItem()
+
+                val finalModifier = if (AppearancePreferences.swipeToHideSong) {
+                    baseModifier.swipeToClose(
+                        key = filteredItems,
+                        requireUnconsumed = true,
+                        onClose = swipeAction
+                    )
+                } else {
+                    baseModifier
+                }
 
                 SongItem(
-                    modifier = Modifier
-                        .combinedClickable(
-                            onLongClick = {
-                                keyboardController?.hide()
-                                menuState.display {
-                                    InHistoryMediaItemMenu(
-                                        song = song,
-                                        onDismiss = menuState::hide,
-                                        onHideFromDatabase = { hidingSong = song.id }
-                                    )
-                                }
-                            },
-                            onClick = {
-                                keyboardController?.hide()
-                                binder?.stopRadio()
-                                binder?.player?.forcePlayAtIndex(
-                                    items.map(Song::asMediaItem),
-                                    items.indexOf(song)
-                                )
-                            }
-                        )
-                        .animateItem()
-                        .let {
-                            if (AppearancePreferences.swipeToHideSong) it.swipeToClose(
-                                key = filteredItems,
-                                requireUnconsumed = true
-                            ) { animationJob ->
-                                if (AppearancePreferences.swipeToHideSongConfirm)
-                                    hidingSong = song.id
-                                else {
-                                    if (!song.isLocal) binder?.cache?.removeResource(song.id)
-                                    transaction { Database.delete(song) }
-                                }
-                                animationJob.join()
-                            } else it
-                        },
+                    modifier = finalModifier,
                     song = song,
                     thumbnailSize = Dimensions.thumbnails.song,
                     onThumbnailContent = if (sortBy == SongSortBy.PlayTime) {
@@ -335,7 +356,6 @@ fun HideSongDialog(
             onConfirm()
             query {
                 runCatching {
-                    if (!song.isLocal) binder?.cache?.removeResource(song.id)
                     Database.delete(song)
                 }
             }

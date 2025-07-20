@@ -58,8 +58,8 @@ private val coroutineScope = CoroutineScope(
 )
 
 // While the class is not a singleton (lifecycle), there should only be one download state at a time
-private val mutableDownloadState = MutableStateFlow(false)
-val downloadState = mutableDownloadState.asStateFlow()
+private val mutablePrecacheState = MutableStateFlow(false)
+val precacheState = mutablePrecacheState.asStateFlow()
 
 private const val DOWNLOAD_NOTIFICATION_UPDATE_INTERVAL = 1000L // default
 private const val DOWNLOAD_WORK_NAME = "precacher-work"
@@ -132,7 +132,7 @@ class PrecacheService : DownloadService(
         super.onCreate()
 
         notificationActionReceiver.register()
-        mutableDownloadState.update { false }
+        mutablePrecacheState.update { false }
     }
 
     @kotlin.OptIn(FlowPreview::class)
@@ -161,7 +161,7 @@ class PrecacheService : DownloadService(
                 .receiveAsFlow()
                 .debounce(100.milliseconds)
                 .collect { downloadManager ->
-                    mutableDownloadState.update { !downloadManager.isIdle }
+                    mutablePrecacheState.update { !downloadManager.isIdle }
                 }
         }
 
@@ -184,7 +184,7 @@ class PrecacheService : DownloadService(
             addListener(
                 object : DownloadManager.Listener {
                     override fun onIdle(downloadManager: DownloadManager) =
-                        mutableDownloadState.update { false }
+                        mutablePrecacheState.update { false }
 
                     override fun onDownloadChanged(
                         downloadManager: DownloadManager,
@@ -236,7 +236,7 @@ class PrecacheService : DownloadService(
         }
 
         unregisterReceiver(notificationActionReceiver)
-        mutableDownloadState.update { false }
+        mutablePrecacheState.update { false }
     }
 
     companion object {

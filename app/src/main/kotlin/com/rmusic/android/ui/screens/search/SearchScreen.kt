@@ -81,7 +81,7 @@ fun SearchScreen(
                 onTabChange = onTabChanged,
                 tabColumnContent = {
                     tab(0, R.string.online, R.drawable.globe, canHide = false)
-                    tab(1, R.string.library, R.drawable.library)
+                    tab(1, R.string.downloads, R.drawable.download)
                 }
             ) { currentTabIndex ->
                 saveableStateHolder.SaveableStateProvider(currentTabIndex) {
@@ -95,7 +95,7 @@ fun SearchScreen(
                             focused = child == null
                         )
 
-                        1 -> LocalSongSearch(
+                        1 -> DownloadedSongSearch(
                             textFieldValue = textFieldValue,
                             onTextFieldValueChange = onTextFieldValueChanged,
                             decorationBox = decorationBox
