@@ -10,7 +10,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 21
+        minSdk = 24
     }
 
     compileOptions {
@@ -39,4 +39,7 @@ dependencies {
     // For downloading files
     implementation(libs.ktor.client.okhttp)
     implementation(libs.okhttp)
+    
+    // KDownloader library for enhanced download functionality
+    implementation(libs.kdownloader)
 }

@@ -98,7 +98,7 @@ class DownloadWorker(
             outputFile.parentFile?.mkdirs()
 
             val downloadProvider = HttpDownloadProvider(httpClient)
-            val flow = downloadProvider.downloadTrackWithUrl(
+            val flow = downloadProvider.downloadTrack(
                 trackId = trackId,
                 outputDir = outputFile.parentFile!!.absolutePath,
                 filename = outputFile.name,
@@ -128,7 +128,7 @@ class DownloadWorker(
                     else -> { /* Continue */ }
                 }
             }
-            Result.success()
+            return Result.success()
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Download worker failed", e)
             
@@ -139,7 +139,7 @@ class DownloadWorker(
                 android.util.Log.w(TAG, "Failed to clean up partial file", cleanupError)
             }
             
-            if (runAttemptCount < 3) {
+            return if (runAttemptCount < 3) {
                 Result.retry()
             } else {
                 Result.failure()

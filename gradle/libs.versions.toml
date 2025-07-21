@@ -89,3 +89,6 @@ desugaring = { module = "com.android.tools:desugar_jdk_libs", version = "2.1.5" 
 
 detekt_compose = { module = "io.nlopez.compose.rules:detekt", version = "0.4.5" }
 detekt_formatting = { module = "io.gitlab.arturbosch.detekt:detekt-formatting", version.ref = "detekt" }
+
+# KDownloader library for Android downloads with pause/resume support
+kdownloader = { module = "com.github.varungulatii:Kdownloader", version = "1.0.4" }

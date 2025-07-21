@@ -21,7 +21,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class DownloadManager(
     private val downloadDir: File,
-    private val providers: Map<String, DownloadProvider>
+    private val providers: Map<String, DownloadProvider>,
+    private val context: android.content.Context? = null
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     
@@ -29,6 +30,9 @@ class DownloadManager(
     val downloads: StateFlow<Map<String, DownloadItem>> = _downloads.asStateFlow()
     
     private val activeDownloads = ConcurrentHashMap<String, DownloadProvider>()
+
+    // Add KDownloadProvider if context is available
+    private val kDownloadProvider: KDownloadProvider? = context?.let { KDownloadProvider(it) }
     
     init {
         // Ensure download directory exists
@@ -36,7 +40,7 @@ class DownloadManager(
     }
     
     /**
-     * Starts downloading a track
+     * Starts downloading a track with enhanced provider selection
      */
     suspend fun downloadTrack(
         providerId: String,
@@ -48,9 +52,13 @@ class DownloadManager(
         duration: Long? = null,
         url: String
     ) {
-        val provider = providers[providerId] ?: throw IllegalArgumentException("Unknown provider: $providerId")
+        // Use KDownloadProvider if available and requested, otherwise fallback
+        val provider = when {
+            providerId == "kdownloader" && kDownloadProvider != null -> kDownloadProvider
+            else -> providers[providerId] ?: throw IllegalArgumentException("Unknown provider: $providerId")
+        }
         
-        // Create organized directory structure: Artist/Album/
+        // Create organized directory structure: Artist/Album/ (Music dir already handled by service)
         val artistDir = File(downloadDir, sanitizeFilename(artist ?: "Unknown Artist"))
         val albumDir = File(artistDir, sanitizeFilename(album ?: "Unknown Album"))
         albumDir.mkdirs()
@@ -74,26 +82,32 @@ class DownloadManager(
         _downloads.value = _downloads.value + (trackId to downloadItem)
         activeDownloads[trackId] = provider
         
+        android.util.Log.d("DownloadManager", "Using provider: ${provider.javaClass.simpleName}")
+
         // Create and start the download flow
-        val downloadFlow = if (provider is HttpDownloadProvider) {
-            provider.downloadTrackWithUrl(trackId, albumDir.absolutePath, filename, url)
-        } else {
-            provider.downloadTrack(trackId, albumDir.absolutePath, filename)
-        }
+        val downloadFlow = provider.downloadTrack(trackId, albumDir.absolutePath, filename, url)
         
         // Launch a coroutine to monitor the download and update state
         scope.launch {
-            downloadFlow.collect { state ->
-                updateDownloadState(trackId, state)
-                
-                // Remove from active downloads when completed, failed, or cancelled
-                when (state) {
-                    is DownloadState.Completed,
-                    is DownloadState.Failed,
-                    is DownloadState.Cancelled -> {
-                        activeDownloads.remove(trackId)
+            try {
+                downloadFlow.collect { state ->
+                    updateDownloadState(trackId, state)
+
+                    // Remove from active downloads when completed, failed, or cancelled
+                    when (state) {
+                        is DownloadState.Completed,
+                        is DownloadState.Failed,
+                        is DownloadState.Cancelled -> {
+                            activeDownloads.remove(trackId)
+                        }
+                        else -> {}
                     }
-                    else -> {}
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("DownloadManager", "Error in download flow for $title", e)
+                val currentItem = _downloads.value[trackId]
+                if (currentItem != null) {
+                    handleDownloadFailure(currentItem, e)
                 }
             }
         }
@@ -240,6 +254,34 @@ class DownloadManager(
         val currentDownload = _downloads.value[trackId] ?: return
         val updatedDownload = currentDownload.copy(state = state)
         _downloads.value = _downloads.value + (trackId to updatedDownload)
+    }
+    
+    /**
+     * Clean up old download files and KDownloader cache
+     */
+    fun cleanUpDownloads(days: Int = 7) {
+        kDownloadProvider?.cleanUp(days)
+        
+        // Additional cleanup logic for your custom downloads if needed
+        // This could include cleaning up failed downloads, temporary files, etc.
+    }
+    
+    /**
+     * Cancel all downloads including KDownloader downloads
+     */
+    fun cancelAllDownloads() {
+        kDownloadProvider?.cancelAllDownloads()
+        
+        // Cancel other provider downloads
+        activeDownloads.keys.forEach { trackId ->
+            scope.launch {
+                activeDownloads[trackId]?.cancelDownload(trackId)
+            }
+        }
+        
+        // Clear state
+        activeDownloads.clear()
+        _downloads.value = emptyMap()
     }
     
     private fun sanitizeFilename(name: String): String {

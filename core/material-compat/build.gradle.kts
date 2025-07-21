@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.google.android.material"
+    namespace = "com.rmusic.core.material_compat"
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 21
+        minSdk = 24
     }
 
     sourceSets.all {

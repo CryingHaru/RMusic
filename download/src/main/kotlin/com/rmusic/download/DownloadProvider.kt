@@ -11,7 +11,8 @@ interface DownloadProvider {
     suspend fun downloadTrack(
         trackId: String,
         outputDir: String,
-        filename: String?
+        filename: String?,
+        url: String
     ): Flow<DownloadState>
 
     suspend fun pauseDownload(downloadId: String): Result<Unit>

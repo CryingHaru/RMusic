@@ -22,6 +22,7 @@ import com.rmusic.android.workers.DownloadWorker
 import com.rmusic.download.DownloadManager
 import com.rmusic.download.DownloadState
 import com.rmusic.download.HttpDownloadProvider
+import com.rmusic.download.KDownloadProvider
 import com.rmusic.download.models.DownloadItem
 import com.rmusic.download.DownloadProvider
 import io.ktor.client.HttpClient
@@ -101,18 +102,24 @@ class MusicDownloadService : InvincibleService() {
         
         notificationManager = getSystemService()!!
         
-        // Initialize download manager with Music folder
-        val musicDir = File(getExternalFilesDir(null), "Music")
+        // Check storage permissions before initializing
+        if (!com.rmusic.android.utils.PermissionManager.hasStoragePermissions(this)) {
+            android.util.Log.w(TAG, "Storage permissions not granted, downloads may fail")
+        }
+        
+        // Initialize download manager with external storage Music directory
+        val musicDir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC), "RMusic")
         musicDir.mkdirs()
         
         android.util.Log.d(TAG, "Music directory: ${musicDir.absolutePath}")
         
         val providers: Map<String, DownloadProvider> = mapOf(
-            "innertube" to HttpDownloadProvider(httpClient), // using HTTP provider for innertube
-            "http" to HttpDownloadProvider(httpClient)
+            "innertube" to HttpDownloadProvider(httpClient),
+            "http" to HttpDownloadProvider(httpClient),
+            "kdownloader" to KDownloadProvider(this) // Add KDownloadProvider
         )
         
-        downloadManager = DownloadManager(musicDir, providers)
+        downloadManager = DownloadManager(musicDir, providers, this)
         
         android.util.Log.d(TAG, "DownloadManager initialized")
         
@@ -284,6 +291,13 @@ class MusicDownloadService : InvincibleService() {
         when (intent.getStringExtra("action")) {
             "download" -> {
                 android.util.Log.d(TAG, "Download action received")
+                
+                // Check storage permissions before starting download
+                if (!com.rmusic.android.utils.PermissionManager.hasStoragePermissions(this)) {
+                    android.util.Log.w(TAG, "Storage permissions not granted, cannot start download")
+                    return
+                }
+                
                 val trackId = intent.getStringExtra("trackId") ?: return
                 val title = intent.getStringExtra("title") ?: return
                 val artist = intent.getStringExtra("artist")
@@ -299,12 +313,11 @@ class MusicDownloadService : InvincibleService() {
                     try {
                         android.util.Log.d(TAG, "About to call downloadManager.downloadTrack for $title")
                         
-                        // Try immediate download first using Innertube provider for YouTube Music URLs
+                        // Try immediate download using KDownloader first, fallback to other providers
                         try {
-                            val providerId = if (url.contains("youtube") || url.contains("googlevideo")) {
-                                "innertube"
-                            } else {
-                                "http"
+                            val providerId = when {
+                                url.contains("youtube") || url.contains("googlevideo") -> "kdownloader"
+                                else -> "kdownloader"
                             }
                             
                             downloadManager.downloadTrack(
@@ -350,6 +363,17 @@ class MusicDownloadService : InvincibleService() {
                 val trackId = intent.getStringExtra("trackId") ?: return
                 scope.launch {
                     downloadManager.cancelDownload(trackId)
+                }
+            }
+            "cleanup" -> {
+                val days = intent.getIntExtra("days", 7)
+                scope.launch {
+                    try {
+                        downloadManager.cleanUpDownloads(days)
+                        android.util.Log.d(TAG, "Cleaned up old download files ($days days)")
+                    } catch (e: Exception) {
+                        android.util.Log.e(TAG, "Error during cleanup", e)
+                    }
                 }
             }
             else -> {
@@ -415,6 +439,16 @@ class MusicDownloadService : InvincibleService() {
     companion object {
         private const val TAG = "MusicDownloadService"
         
+        // Cleanup old files
+        fun cleanUp(context: Context, days: Int) {
+            val intent = Intent(context, MusicDownloadService::class.java).apply {
+                putExtra("action", "cleanup")
+                putExtra("days", days)
+            }
+            context.startService(intent)
+        }
+        
+        // Other existing companion functions...
         fun download(
             context: Context,
             trackId: String,

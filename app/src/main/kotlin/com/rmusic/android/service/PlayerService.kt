@@ -138,6 +138,7 @@ import com.rmusic.providers.sponsorblock.models.Action
 import com.rmusic.providers.sponsorblock.models.Category
 import com.rmusic.providers.sponsorblock.requests.segments
 import io.ktor.client.plugins.ClientRequestException
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -1436,7 +1437,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                 upstreamDataSourceFactory = context.defaultDataSource,
                 shouldCache = { !it.isLocal }
             )
-        ) { dataSpec ->
+        ) resolver@{ dataSpec ->
             val mediaId = dataSpec.key?.removePrefix("https://youtube.com/watch?v=")
                 ?: error("A key must be set")
 
@@ -1451,14 +1452,32 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                     .withAdditionalHeaders(mapOf("Range" to "bytes=$rangeText"))
             } ?: this
 
+            // Handle local files (cached and downloaded)
+            if (dataSpec.isLocal) {
+                return@resolver dataSpec
+            }
+
+            // Check for downloaded files
+            if (mediaId.startsWith("download:")) {
+                val downloadedSong = runBlocking(Dispatchers.IO) {
+                    Database.downloadedSongs().first().find { it.id == mediaId }
+                }
+                
+                if (downloadedSong != null && File(downloadedSong.filePath).exists()) {
+                    return@resolver dataSpec
+                        .withUri(File(downloadedSong.filePath).toUri())
+                } else {
+                    // Downloaded song not found or file doesn't exist
+                    throw PlayableFormatNotFoundException()
+                }
+            }
+
             if (
-                dataSpec.isLocal || (
-                    chunkLength != null && cache.isCached(
-                        /* key = */ mediaId,
-                        /* position = */ dataSpec.position,
-                        /* length = */ chunkLength
-                    )
-                    )
+                chunkLength != null && cache.isCached(
+                    /* key = */ mediaId,
+                    /* position = */ dataSpec.position,
+                    /* length = */ chunkLength
+                )
             ) dataSpec
             else uriCache[mediaId]?.let { cachedUri ->
                 dataSpec

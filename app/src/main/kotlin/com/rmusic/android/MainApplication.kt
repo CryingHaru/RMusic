@@ -173,6 +173,9 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Check and request storage permissions immediately
+        com.rmusic.android.utils.PermissionManager.checkAndRequestStoragePermissions(this)
+
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         MonetCompat.setup(this)

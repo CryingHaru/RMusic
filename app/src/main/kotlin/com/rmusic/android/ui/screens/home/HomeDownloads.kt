@@ -159,44 +159,57 @@ fun HomeDownloads(onSearchClick: () -> Unit) {
                 }
             }
 
-            // Artist grid (Apple Music style)
+            // Album organization by artist (Music app style)
             if (downloadedArtists.isNotEmpty()) {
-                item(
-                    key = "artists-header",
-                    contentType = 2
-                ) {
-                    Text(
-                        text = stringResource(R.string.artists),
-                        style = typography.l.copy(fontWeight = FontWeight.Bold),
-                        color = colorPalette.text,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
-                }
-
-                itemsIndexed(
-                    items = downloadedArtists.chunked(2),
-                    key = { index, _ -> "artist-row-$index" }
-                ) { _, artistPair ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        artistPair.forEach { artist ->
-                            ArtistCard(
-                                artist = artist,
-                                onClick = { /* Navigate to artist downloads */ },
-                                modifier = Modifier.weight(1f)
+                items(
+                    count = downloadedArtists.size,
+                    key = { index -> downloadedArtists[index] }
+                ) { index ->
+                    val artist = downloadedArtists[index]
+                    val albumsByArtist by Database.downloadedAlbumsByArtist(artist).collectAsState(initial = emptyList())
+                    
+                    if (albumsByArtist.isNotEmpty()) {
+                        Column {
+                            Text(
+                                text = artist,
+                                style = typography.l.copy(fontWeight = FontWeight.Bold),
+                                color = colorPalette.text,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                             )
-                        }
-                        // Add empty space if odd number of artists
-                        if (artistPair.size == 1) {
-                            Spacer(modifier = Modifier.weight(1f))
+
+                            // Use a Column with Rows instead of LazyVerticalGrid
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                albumsByArtist.chunked(2).forEach { rowAlbums ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        rowAlbums.forEach { album ->
+                                            AlbumCard(
+                                                artist = artist,
+                                                album = album,
+                                                onClick = { /* Navigate to album downloads */ },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        // Fill remaining space if odd number of albums
+                                        if (rowAlbums.size < 2) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-            } else if (activeDownloads.isEmpty()) {
+            }
+
+            if (activeDownloads.isEmpty() && downloadedArtists.isEmpty()) {
                 item(
                     key = "empty",
                     contentType = 3
@@ -327,6 +340,72 @@ private fun DownloadItemRow(item: DownloadItem) {
             }
             IconButton(onClick = { MusicDownloadService.cancel(context, item.id) }) {
                 Icon(painterResource(R.drawable.close), contentDescription = stringResource(R.string.cancel))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlbumCard(
+    artist: String,
+    album: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val (colorPalette, typography) = LocalAppearance.current
+    
+    // Get first song by this artist and album for thumbnail
+    val albumSongs by Database.downloadedSongsByArtistAndAlbum(artist, album).collectAsState(initial = emptyList())
+    val thumbnailUrl = albumSongs.firstOrNull()?.thumbnailUrl
+    
+    Card(
+        modifier = modifier
+            .height(120.dp)
+            .clickable { onClick() }
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // Background image
+            AsyncImage(
+                model = thumbnailUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(8.dp))
+            )
+            
+            // Gradient overlay
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        color = Color.Black.copy(alpha = 0.4f),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+            )
+            
+            // Album info
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = album,
+                    style = typography.s.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${albumSongs.size} ${if (albumSongs.size == 1) "song" else "songs"}",
+                    style = typography.xs,
+                    color = Color.White.copy(alpha = 0.8f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

@@ -415,4 +415,28 @@
 [{"include": "https://signin.example.com/.well-known/assetlinks.json"}]
 </string>
     <string name="playback_error">Error de reproducción: %1$s</string>
+    
+    <!-- KDownloader Settings -->
+    <string name="kdownloader_settings">KDownloader Settings</string>
+    <string name="download_management">Download Management</string>
+    <string name="active_downloads_count">%1$d active downloads</string>
+    <string name="pause_all_downloads">Pause All Downloads</string>
+    <string name="resume_all_downloads">Resume All Downloads</string>
+    <string name="pause_resume_all_description">Control all downloads at once</string>
+    <string name="cancel_all_downloads">Cancel All Downloads</string>
+    <string name="cancel_all_downloads_description">Stop and remove all downloads</string>
+    <string name="cleanup_and_maintenance">Cleanup and Maintenance</string>
+    <string name="cleanup_old_files">Cleanup Old Files</string>
+    <string name="cleanup_old_files_description">Remove old and temporary download files</string>
+    <string name="kdownloader_info">KDownloader Info</string>
+    <string name="kdownloader_description">Advanced download engine with enhanced capabilities</string>
+    <string name="kdownloader_features">Features:</string>
+    <string name="feature_pause_resume">• Pause and resume downloads</string>
+    <string name="feature_large_files">• Support for large files</string>
+    <string name="feature_parallel_downloads">• Parallel download streams</string>
+    <string name="feature_progress_tracking">• Real-time progress tracking</string>
+    <string name="feature_error_handling">• Advanced error handling</string>
+    <string name="cleanup_confirmation">Are you sure you want to cleanup old files?</string>
+    <string name="cancel_all_confirmation">Are you sure you want to cancel all downloads?</string>
+    <string name="cancel_all">Cancel All</string>
 </resources>

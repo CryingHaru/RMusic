@@ -125,10 +125,19 @@ val Song.asMediaItem: MediaItem
         )
         .setMediaId(id)
         .setUri(
-            if (isLocal) ContentUris.withAppendedId(
-                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                id.substringAfter(LOCAL_KEY_PREFIX).toLong()
-            ) else id.toUri()
+            when {
+                // Handle downloaded songs with direct file path
+                id.startsWith("download:") -> {
+                    // Try to get the downloaded song from the database
+                    // This will be resolved later in the PlayerService
+                    id.toUri()
+                }
+                isLocal -> ContentUris.withAppendedId(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    id.substringAfter(LOCAL_KEY_PREFIX).toLong()
+                )
+                else -> id.toUri()
+            }
         )
         .setCustomCacheKey(id)
         .build()
