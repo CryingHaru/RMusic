@@ -12,8 +12,12 @@ data class DownloadedSong(
     val title: String,
     val artistsText: String? = null,
     val albumTitle: String? = null,
+    val albumId: String? = null,
+    val artistIds: String? = null, // JSON string of artist IDs
     val durationText: String?,
     val thumbnailUrl: String?,
+    val year: String? = null,
+    val albumThumbnailUrl: String? = null,
     val filePath: String,
     val fileSize: Long,
     val downloadedAt: Long = System.currentTimeMillis(),

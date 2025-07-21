@@ -33,6 +33,8 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteQuery
 import com.rmusic.android.models.DownloadedSong
+import com.rmusic.android.models.DownloadedAlbum
+import com.rmusic.android.models.DownloadedArtist
 import com.rmusic.android.models.Album
 import com.rmusic.android.models.Artist
 import com.rmusic.android.models.Event
@@ -93,6 +95,10 @@ interface Database {
     fun downloadedAlbumsByArtist(artist: String): Flow<List<String>>
 
     @Transaction
+    @Query("SELECT DISTINCT albumTitle FROM DownloadedSong WHERE albumTitle IS NOT NULL ORDER BY albumTitle")
+    fun downloadedAlbums(): Flow<List<String>>
+
+    @Transaction
     @Query("SELECT * FROM DownloadedSong WHERE artistsText = :artist AND albumTitle = :album ORDER BY title")
     fun downloadedSongsByArtistAndAlbum(artist: String, album: String): Flow<List<DownloadedSong>>
 
@@ -101,6 +107,50 @@ interface Database {
 
     @Query("SELECT SUM(fileSize) FROM DownloadedSong")
     fun totalDownloadedSize(): Flow<Long?>
+
+    // Downloaded albums queries
+    @Transaction
+    @Query("SELECT * FROM DownloadedAlbum ORDER BY downloadedAt DESC")
+    fun downloadedAlbumsData(): Flow<List<DownloadedAlbum>>
+
+    @Transaction
+    @Query("SELECT * FROM DownloadedAlbum WHERE id = :albumId")
+    fun downloadedAlbum(albumId: String): Flow<DownloadedAlbum?>
+
+    @Transaction
+    @Query("SELECT * FROM DownloadedSong WHERE albumId = :albumId ORDER BY title")
+    fun downloadedSongsByAlbumId(albumId: String): Flow<List<DownloadedSong>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun insert(downloadedAlbum: DownloadedAlbum)
+
+    @Update
+    fun update(downloadedAlbum: DownloadedAlbum)
+
+    @Delete
+    fun delete(downloadedAlbum: DownloadedAlbum)
+
+    // Downloaded artists queries
+    @Transaction
+    @Query("SELECT * FROM DownloadedArtist ORDER BY downloadedAt DESC")
+    fun downloadedArtistsData(): Flow<List<DownloadedArtist>>
+
+    @Transaction
+    @Query("SELECT * FROM DownloadedArtist WHERE id = :artistId")
+    fun downloadedArtist(artistId: String): Flow<DownloadedArtist?>
+
+    @Transaction
+    @Query("SELECT * FROM DownloadedSong WHERE artistIds LIKE '%' || :artistId || '%' ORDER BY albumTitle, title")
+    fun downloadedSongsByArtistId(artistId: String): Flow<List<DownloadedSong>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun insert(downloadedArtist: DownloadedArtist)
+
+    @Update
+    fun update(downloadedArtist: DownloadedArtist)
+
+    @Delete
+    fun delete(downloadedArtist: DownloadedArtist)
 
     @Transaction
     @Query("SELECT * FROM Song WHERE id NOT LIKE '$LOCAL_KEY_PREFIX%' ORDER BY ROWID DESC")
@@ -806,6 +856,8 @@ interface Database {
     entities = [
         Song::class,
         DownloadedSong::class,
+        DownloadedAlbum::class,
+        DownloadedArtist::class,
         SongPlaylistMap::class,
         Playlist::class,
         Artist::class,
@@ -821,7 +873,7 @@ interface Database {
         DownloadItem::class
     ],
     views = [SortedSongPlaylistMap::class],
-    version = 32,
+    version = 33,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -850,7 +902,8 @@ interface Database {
         AutoMigration(from = 28, to = 29),
         AutoMigration(from = 29, to = 30),
         AutoMigration(from = 30, to = 31),
-        AutoMigration(from = 31, to = 32)
+        AutoMigration(from = 31, to = 32),
+        AutoMigration(from = 32, to = 33)
     ]
 )
 @TypeConverters(Converters::class, DownloadStateConverter::class)

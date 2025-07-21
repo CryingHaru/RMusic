@@ -13,6 +13,8 @@ import com.rmusic.android.preferences.DataPreferences
 import com.rmusic.android.query
 import com.rmusic.android.ui.screens.album.AlbumScreen
 import com.rmusic.android.ui.screens.artist.ArtistScreen
+import com.rmusic.android.ui.screens.home.DownloadedAlbumScreen
+import com.rmusic.android.ui.screens.home.DownloadedArtistScreen
 import com.rmusic.android.ui.screens.pipedplaylist.PipedPlaylistScreen
 import com.rmusic.android.ui.screens.playlist.PlaylistScreen
 import com.rmusic.android.ui.screens.search.SearchScreen
@@ -48,6 +50,8 @@ val moodRoute = Route1<Mood>("moodRoute")
 val searchResultRoute = Route1<String>("searchResultRoute")
 val searchRoute = Route1<String>("searchRoute")
 val settingsRoute = Route0("settingsRoute")
+val downloadedAlbumRoute = Route1<String>("downloadedAlbumRoute")
+val downloadedArtistRoute = Route1<String>("downloadedArtistRoute")
 
 @Composable
 fun RouteHandlerScope.GlobalRoutes() {
@@ -60,6 +64,14 @@ fun RouteHandlerScope.GlobalRoutes() {
 
     artistRoute { browseId ->
         ArtistScreen(browseId = browseId)
+    }
+
+    downloadedAlbumRoute { albumId ->
+        DownloadedAlbumScreen(albumId = albumId)
+    }
+
+    downloadedArtistRoute { artistId ->
+        DownloadedArtistScreen(artistId = artistId)
     }
 
     logsRoute {

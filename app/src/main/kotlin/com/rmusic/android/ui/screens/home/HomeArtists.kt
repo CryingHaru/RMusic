@@ -42,6 +42,7 @@ import com.rmusic.core.data.enums.SortOrder
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
 import kotlinx.collections.immutable.toImmutableList
+import androidx.compose.runtime.collectAsState
 
 @Route
 @Composable
@@ -51,13 +52,9 @@ fun HomeArtistList(
 ) = with(OrderPreferences) {
     val (colorPalette) = LocalAppearance.current
 
-    var items by persistList<Artist>("home/artists")
-
-    LaunchedEffect(artistSortBy, artistSortOrder) {
-        Database
-            .artists(artistSortBy, artistSortOrder)
-            .collect { items = it.toImmutableList() }
-    }
+    // Get downloaded artists instead of all artists
+    val downloadedArtistsData by Database.downloadedArtistsData().collectAsState(initial = emptyList())
+    val items = downloadedArtistsData.map { it.toArtist() }.toImmutableList()
 
     val sortOrderIconRotation by animateFloatAsState(
         targetValue = if (artistSortOrder == SortOrder.Ascending) 0f else 180f,

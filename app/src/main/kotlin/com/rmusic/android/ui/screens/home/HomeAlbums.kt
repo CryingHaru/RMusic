@@ -38,6 +38,7 @@ import com.rmusic.core.data.enums.AlbumSortBy
 import com.rmusic.core.data.enums.SortOrder
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
+import androidx.compose.runtime.collectAsState
 
 @Route
 @Composable
@@ -47,11 +48,9 @@ fun HomeAlbums(
 ) = with(OrderPreferences) {
     val (colorPalette) = LocalAppearance.current
 
-    var items by persist<List<Album>>(tag = "home/albums", emptyList())
-
-    LaunchedEffect(albumSortBy, albumSortOrder) {
-        Database.albums(albumSortBy, albumSortOrder).collect { items = it }
-    }
+    // Get downloaded albums instead of all albums
+    val downloadedAlbumsData by Database.downloadedAlbumsData().collectAsState(initial = emptyList())
+    val items = downloadedAlbumsData.map { it.toAlbum() }
 
     val sortOrderIconRotation by animateFloatAsState(
         targetValue = if (albumSortOrder == SortOrder.Ascending) 0f else 180f,

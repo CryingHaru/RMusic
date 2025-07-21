@@ -11,6 +11,8 @@ import com.rmusic.android.ui.screens.Route
 import com.rmusic.android.ui.screens.albumRoute
 import com.rmusic.android.ui.screens.artistRoute
 import com.rmusic.android.ui.screens.builtInPlaylistRoute
+import com.rmusic.android.ui.screens.downloadedAlbumRoute
+import com.rmusic.android.ui.screens.downloadedArtistRoute
 import com.rmusic.android.ui.screens.builtinplaylist.BuiltInPlaylistScreen
 import com.rmusic.android.ui.screens.localPlaylistRoute
 import com.rmusic.android.ui.screens.localplaylist.LocalPlaylistScreen
@@ -68,12 +70,11 @@ fun HomeScreen() {
                 onTabChange = { UIStatePreferences.homeScreenTabIndex = it },
                 tabColumnContent = {
                     tab(0, R.string.quick_picks, R.drawable.sparkles)
-                    tab(1, R.string.discover, R.drawable.globe)
-                    tab(2, R.string.songs, R.drawable.musical_notes)
-                    tab(3, R.string.playlists, R.drawable.playlist)
-                    tab(4, R.string.artists, R.drawable.person)
-                    tab(5, R.string.albums, R.drawable.disc)
-                    tab(6, R.string.downloads, R.drawable.download)
+                    tab(1, R.string.songs, R.drawable.musical_notes)
+                    tab(2, R.string.albums, R.drawable.disc)
+                    tab(3, R.string.artists, R.drawable.person)
+                    tab(4, R.string.history, R.drawable.history)
+                    tab(5, R.string.downloads, R.drawable.download)
                 }
             ) { currentTabIndex ->
                 saveableStateHolder.SaveableStateProvider(key = currentTabIndex) {
@@ -93,20 +94,21 @@ fun HomeScreen() {
                             onSearchClick = onSearchClick
                         )
 
-                        1 -> HomeDiscovery(
-                            onMoodClick = { mood -> moodRoute(mood.toUiMood()) },
-                            onNewReleaseAlbumClick = { albumRoute(it) },
-                            onSearchClick = onSearchClick,
-                            onMoreMoodsClick = { moreMoodsRoute() },
-                            onMoreAlbumsClick = { moreAlbumsRoute() },
-                            onPlaylistClick = { playlistRoute(it, null, null, true) }
-                        )
-
-                        2 -> HomeSongs(
+                        1 -> HomeSongs(
                             onSearchClick = onSearchClick
                         )
 
-                        3 -> HomePlaylists(
+                        2 -> HomeAlbums(
+                            onAlbumClick = { downloadedAlbumRoute(it.id) },
+                            onSearchClick = onSearchClick
+                        )
+
+                        3 -> HomeArtistList(
+                            onArtistClick = { downloadedArtistRoute(it.id) },
+                            onSearchClick = onSearchClick
+                        )
+
+                        4 -> HomePlaylists(
                             onBuiltInPlaylist = { builtInPlaylistRoute(it) },
                             onPlaylistClick = { localPlaylistRoute(it.id) },
                             onPipedPlaylistClick = { session, playlist ->
@@ -119,17 +121,7 @@ fun HomeScreen() {
                             onSearchClick = onSearchClick
                         )
 
-                        4 -> HomeArtistList(
-                            onArtistClick = { artistRoute(it.id) },
-                            onSearchClick = onSearchClick
-                        )
-
-                        5 -> HomeAlbums(
-                            onAlbumClick = { albumRoute(it.id) },
-                            onSearchClick = onSearchClick
-                        )
-
-                        6 -> HomeDownloads(
+                        5 -> HomeDownloads(
                             onSearchClick = onSearchClick
                         )
                     }

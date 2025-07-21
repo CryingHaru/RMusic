@@ -13,10 +13,13 @@ import androidx.media3.common.util.UnstableApi
 import androidx.work.WorkManager
 import com.rmusic.android.R
 import com.rmusic.android.models.DownloadedSong
+import com.rmusic.android.models.DownloadedAlbum
+import com.rmusic.android.models.DownloadedArtist
 import com.rmusic.android.Database
 import com.rmusic.android.utils.intent
 import com.rmusic.android.MainActivity
 import com.rmusic.android.utils.InvincibleService
+import com.rmusic.android.utils.thumbnail
 import com.rmusic.android.service.ServiceNotifications
 import com.rmusic.android.workers.DownloadWorker
 import com.rmusic.download.DownloadManager
@@ -26,6 +29,9 @@ import com.rmusic.download.KDownloadProvider
 import com.rmusic.download.models.DownloadItem
 import com.rmusic.download.DownloadProvider
 import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.statement.readBytes
+import io.ktor.http.isSuccess
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -164,22 +171,295 @@ class MusicDownloadService : InvincibleService() {
             try {
                 val file = File((downloadItem.state as DownloadState.Completed).filePath)
                 if (file.exists()) {
+                    // Get the original song from the database to extract metadata
+                    val originalSong = try {
+                        Database.song(downloadItem.id).first()
+                    } catch (e: Exception) {
+                        null
+                    }
+                    
+                    // Get album information if available
+                    val albumInfo = originalSong?.let { song ->
+                        try {
+                            Database.songAlbumInfo(song.id)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    
+                    // Get artist information if available
+                    val artistsInfo = originalSong?.let { song ->
+                        try {
+                            Database.songArtistInfo(song.id)
+                        } catch (e: Exception) {
+                            emptyList()
+                        }
+                    } ?: emptyList()
+                    
                     val downloadedSong = DownloadedSong(
                         id = "download:${downloadItem.id}",
                         title = downloadItem.title,
-                        artistsText = downloadItem.artist,
-                        albumTitle = downloadItem.album,
-                        durationText = downloadItem.duration?.let { "${it / 1000 / 60}:${(it / 1000) % 60}" },
-                        thumbnailUrl = downloadItem.thumbnailUrl,
+                        artistsText = downloadItem.artist ?: originalSong?.artistsText,
+                        albumTitle = downloadItem.album ?: albumInfo?.name,
+                        albumId = albumInfo?.id,
+                        artistIds = artistsInfo.joinToString(",") { it.id }, // Store as comma-separated string
+                        durationText = downloadItem.duration?.let { "${it / 1000 / 60}:${String.format("%02d", (it / 1000) % 60)}" } 
+                            ?: originalSong?.durationText,
+                        thumbnailUrl = downloadItem.thumbnailUrl ?: originalSong?.thumbnailUrl,
+                        year = albumInfo?.let { 
+                            try {
+                                Database.album(it.id).first()?.year
+                            } catch (e: Exception) {
+                                null
+                            }
+                        },
+                        albumThumbnailUrl = albumInfo?.let { 
+                            try {
+                                val albumDir = file.parentFile
+                                val localCover = File(albumDir, "cover.jpg")
+                                if (localCover.exists()) {
+                                    "file://${localCover.absolutePath}"
+                                } else {
+                                    Database.album(it.id).first()?.thumbnailUrl
+                                }
+                            } catch (e: Exception) {
+                                null
+                            }
+                        },
                         filePath = file.absolutePath,
                         fileSize = file.length()
                     )
                     
                     Database.insert(downloadedSong)
+                    
+                    // IMMEDIATELY download album cover and artist thumbnail after song download
+                    scope.launch {
+                        // Download album cover if available - use KDownloader provider instead of HttpClient
+                        val albumCoverUrl = downloadItem.thumbnailUrl 
+                            ?: originalSong?.thumbnailUrl 
+                            ?: albumInfo?.let { 
+                                try {
+                                    Database.album(it.id).first()?.thumbnailUrl
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+                        
+                        albumCoverUrl?.let { thumbnailUrl ->
+                            android.util.Log.d(TAG, "Downloading album cover via KDownloader: $thumbnailUrl")
+                            downloadAlbumCoverWithKDownloader(thumbnailUrl, file.parentFile, "cover.jpg")
+                        }
+                        
+                        // Download artist thumbnail - use KDownloader provider instead of HttpClient
+                        val artistThumbnailUrl = downloadItem.thumbnailUrl 
+                            ?: originalSong?.thumbnailUrl
+                            ?: artistsInfo.firstOrNull()?.let { artistInfo ->
+                                try {
+                                    Database.artist(artistInfo.id).first()?.thumbnailUrl
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+                            
+                        artistThumbnailUrl?.let { thumbnailUrl ->
+                            android.util.Log.d(TAG, "Downloading artist thumbnail via KDownloader: $thumbnailUrl")
+                            downloadArtistThumbnailWithKDownloader(thumbnailUrl, file.parentFile?.parentFile, "artist.jpg")
+                        }
+                    }
+                    
+                    albumInfo?.let { info ->
+                        try {
+                            val albumData = Database.album(info.id).first()
+                            albumData?.let { album ->
+                                val downloadedAlbum = DownloadedAlbum(
+                                    id = album.id,
+                                    title = album.title ?: info.name ?: "Unknown Album",
+                                    description = album.description,
+                                    thumbnailUrl = File(file.parentFile, "cover.jpg").let { localCover ->
+                                        if (localCover.exists()) "file://${localCover.absolutePath}" 
+                                        else downloadItem.thumbnailUrl ?: album.thumbnailUrl
+                                    },
+                                    year = album.year,
+                                    authorsText = album.authorsText,
+                                    shareUrl = album.shareUrl,
+                                    otherInfo = album.otherInfo,
+                                    songCount = 1 // We'll update this with actual count later
+                                )
+                                Database.insert(downloadedAlbum)
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e(TAG, "Failed to process album info", e)
+                        }
+                    }
+                    
+                    // Download artist thumbnail if available - use downloadItem.thumbnailUrl from Innertube/KDownloader
+                    val artistThumbnailUrl = downloadItem.thumbnailUrl 
+                        ?: originalSong?.thumbnailUrl
+                        ?: artistsInfo.firstOrNull()?.let { artistInfo ->
+                            try {
+                                Database.artist(artistInfo.id).first()?.thumbnailUrl
+                            } catch (e: Exception) {
+                                null
+                            }
+                        }
+                        
+                    artistThumbnailUrl?.let { thumbnailUrl ->
+                        android.util.Log.d(TAG, "Downloading artist thumbnail via KDownloader: $thumbnailUrl")
+                        downloadArtistThumbnailWithKDownloader(thumbnailUrl, file.parentFile?.parentFile, "artist.jpg")
+                    }
+                    
+                    artistsInfo.forEach { artistInfo ->
+                        try {
+                            val artistData = Database.artist(artistInfo.id).first()
+                            artistData?.let { artist ->
+                                // Use downloadItem.thumbnailUrl as primary source for artist thumbnail
+                                val finalThumbnailUrl = downloadItem.thumbnailUrl ?: artist.thumbnailUrl
+                                
+                                val downloadedArtist = DownloadedArtist(
+                                    id = artist.id,
+                                    name = artist.name ?: artistInfo.name ?: "Unknown Artist",
+                                    thumbnailUrl = File(file.parentFile?.parentFile, "artist.jpg").let { localThumbnail ->
+                                        if (localThumbnail.exists()) "file://${localThumbnail.absolutePath}"
+                                        else finalThumbnailUrl
+                                    },
+                                    songCount = 1 // We'll update this with actual count later
+                                )
+                                Database.insert(downloadedArtist)
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e(TAG, "Failed to process artist info", e)
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }
+    }
+    
+    private suspend fun downloadAlbumCoverWithKDownloader(thumbnailUrl: String, albumDir: File?, filename: String) {
+        if (albumDir == null) {
+            android.util.Log.w(TAG, "Album directory is null, cannot download cover")
+            return
+        }
+        
+        try {
+            // Ensure directory exists
+            if (!albumDir.exists()) {
+                albumDir.mkdirs()
+                android.util.Log.d(TAG, "Created album directory: ${albumDir.absolutePath}")
+            }
+            
+            val coverFile = File(albumDir, filename)
+            if (coverFile.exists()) {
+                android.util.Log.d(TAG, "Album cover already exists: ${coverFile.absolutePath}")
+                return
+            }
+            
+            // Apply high-resolution transformation before downloading
+            val highResUrl = thumbnailUrl.thumbnail(1280) ?: thumbnailUrl
+            
+            android.util.Log.d(TAG, "Downloading album cover via KDownloader from: $highResUrl to: ${coverFile.absolutePath}")
+            
+            // Use KDownloader provider for thumbnail downloads
+            val kdownloadProvider = KDownloadProvider(this@MusicDownloadService)
+            
+            try {
+                kdownloadProvider.downloadTrack(
+                    trackId = "cover_${System.currentTimeMillis()}",
+                    outputDir = albumDir.absolutePath,
+                    filename = filename,
+                    url = highResUrl
+                ).collect { state ->
+                    when (state) {
+                        is DownloadState.Completed -> {
+                            android.util.Log.d(TAG, "Album cover downloaded successfully via KDownloader: ${state.filePath}")
+                        }
+                        is DownloadState.Failed -> {
+                            throw Exception("KDownloader failed: ${state.error}")
+                        }
+                        else -> {
+                            // Download in progress
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "KDownloader failed for album cover, fallback to HttpClient", e)
+                // Fallback to HttpClient if KDownloader fails - also use high res URL
+                val response = httpClient.get(highResUrl)
+                if (response.status.isSuccess()) {
+                    val bytes = response.readBytes()
+                    coverFile.writeBytes(bytes)
+                    android.util.Log.d(TAG, "Album cover saved via HttpClient fallback: ${coverFile.absolutePath} (${bytes.size} bytes)")
+                } else {
+                    android.util.Log.e(TAG, "Failed to download album cover, HTTP status: ${response.status}")
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to download album cover", e)
+        }
+    }
+    
+    private suspend fun downloadArtistThumbnailWithKDownloader(thumbnailUrl: String, artistDir: File?, filename: String) {
+        if (artistDir == null) {
+            android.util.Log.w(TAG, "Artist directory is null, cannot download thumbnail")
+            return
+        }
+        
+        try {
+            // Ensure directory exists
+            if (!artistDir.exists()) {
+                artistDir.mkdirs()
+                android.util.Log.d(TAG, "Created artist directory: ${artistDir.absolutePath}")
+            }
+            
+            val thumbnailFile = File(artistDir, filename)
+            if (thumbnailFile.exists()) {
+                android.util.Log.d(TAG, "Artist thumbnail already exists: ${thumbnailFile.absolutePath}")
+                return
+            }
+            
+            // Apply high-resolution transformation before downloading
+            val highResUrl = thumbnailUrl.thumbnail(1280) ?: thumbnailUrl
+            
+            android.util.Log.d(TAG, "Downloading artist thumbnail via KDownloader from: $highResUrl to: ${thumbnailFile.absolutePath}")
+            
+            // Use KDownloader provider for thumbnail downloads
+            val kdownloadProvider = KDownloadProvider(this@MusicDownloadService)
+            
+            try {
+                kdownloadProvider.downloadTrack(
+                    trackId = "artist_${System.currentTimeMillis()}",
+                    outputDir = artistDir.absolutePath,
+                    filename = filename,
+                    url = highResUrl
+                ).collect { state ->
+                    when (state) {
+                        is DownloadState.Completed -> {
+                            android.util.Log.d(TAG, "Artist thumbnail downloaded successfully via KDownloader: ${state.filePath}")
+                        }
+                        is DownloadState.Failed -> {
+                            throw Exception("KDownloader failed: ${state.error}")
+                        }
+                        else -> {
+                            // Download in progress
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "KDownloader failed for artist thumbnail, fallback to HttpClient", e)
+                // Fallback to HttpClient if KDownloader fails - also use high res URL
+                val response = httpClient.get(highResUrl)
+                if (response.status.isSuccess()) {
+                    val bytes = response.readBytes()
+                    thumbnailFile.writeBytes(bytes)
+                    android.util.Log.d(TAG, "Artist thumbnail saved via HttpClient fallback: ${thumbnailFile.absolutePath} (${bytes.size} bytes)")
+                } else {
+                    android.util.Log.e(TAG, "Failed to download artist thumbnail, HTTP status: ${response.status}")
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to download artist thumbnail", e)
         }
     }
     

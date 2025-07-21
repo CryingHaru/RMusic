@@ -159,6 +159,17 @@ fun String?.thumbnail(
     return when {
         this?.startsWith("https://lh3.googleusercontent.com") == true -> "$this-w$actualSize-h$actualSize"
         this?.startsWith("https://yt3.ggpht.com") == true -> "$this-w$actualSize-h$actualSize-s$actualSize"
+        this?.startsWith("https://i.ytimg.com/vi/") == true -> {
+            // For YouTube video thumbnails, prefer high resolution versions
+            when {
+                actualSize >= 1280 -> this.replace("/mqdefault.jpg", "/maxresdefault.jpg")
+                    .replace("/hqdefault.jpg", "/maxresdefault.jpg")
+                    .replace("/sddefault.jpg", "/maxresdefault.jpg")
+                actualSize >= 480 -> this.replace("/mqdefault.jpg", "/hqdefault.jpg")
+                    .replace("/sddefault.jpg", "/hqdefault.jpg")
+                else -> this
+            }
+        }
         else -> this
     }
 }

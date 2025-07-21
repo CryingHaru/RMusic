@@ -99,8 +99,8 @@ fun HomeSongs(
     HomeSongs(
         onSearchClick = onSearchClick,
         songProvider = {
-            Database.songs(songSortBy, songSortOrder)
-                .map { songs -> songs.filter { it.totalPlayTimeMs > 0L } }
+            Database.downloadedSongs()
+                .map { downloadedSongs -> downloadedSongs.map { it.toSong() } }
         },
         sortBy = songSortBy,
         setSortBy = { songSortBy = it },

@@ -122,7 +122,7 @@ fun HomeDownloads(onSearchClick: () -> Unit) {
                 }
             }
 
-            // Download statistics
+            // Download statistics with Apple Music style
             if (downloadsCount > 0) {
                 item(
                     key = "stats",
@@ -131,25 +131,44 @@ fun HomeDownloads(onSearchClick: () -> Unit) {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(16.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = stringResource(R.string.download_statistics),
-                                style = typography.m.copy(fontWeight = FontWeight.Bold),
-                                color = colorPalette.text
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "$downloadsCount ${stringResource(R.string.songs_downloaded)}",
-                                style = typography.s,
-                                color = colorPalette.textSecondary
-                            )
-                            if ((totalSize ?: 0) > 0) {
+                            // Music icon
+                            Box(
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .background(
+                                        colorPalette.accent.copy(alpha = 0.1f),
+                                        RoundedCornerShape(12.dp)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.musical_notes),
+                                    contentDescription = null,
+                                    tint = colorPalette.accent,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.size(16.dp))
+                            
+                            Column {
                                 Text(
-                                    text = "${formatFileSize(totalSize ?: 0)} ${stringResource(R.string.total_size)}",
+                                    text = stringResource(R.string.downloaded_music),
+                                    style = typography.l.copy(fontWeight = FontWeight.SemiBold),
+                                    color = colorPalette.text
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "$downloadsCount songs • ${formatFileSize(totalSize ?: 0)}",
                                     style = typography.s,
                                     color = colorPalette.textSecondary
                                 )
@@ -159,7 +178,7 @@ fun HomeDownloads(onSearchClick: () -> Unit) {
                 }
             }
 
-            // Album organization by artist (Music app style)
+            // Album organization by artist (Apple Music style)
             if (downloadedArtists.isNotEmpty()) {
                 items(
                     count = downloadedArtists.size,
@@ -169,39 +188,24 @@ fun HomeDownloads(onSearchClick: () -> Unit) {
                     val albumsByArtist by Database.downloadedAlbumsByArtist(artist).collectAsState(initial = emptyList())
                     
                     if (albumsByArtist.isNotEmpty()) {
-                        Column {
-                            Text(
-                                text = artist,
-                                style = typography.l.copy(fontWeight = FontWeight.Bold),
-                                color = colorPalette.text,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                            )
+                        Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                            // Artist header with thumbnail
+                            ArtistHeader(artist = artist)
 
-                            // Use a Column with Rows instead of LazyVerticalGrid
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            // Albums grid (Apple Music style)
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.height(((albumsByArtist.size / 2 + albumsByArtist.size % 2) * 200 + (albumsByArtist.size / 2) * 12).dp)
                             ) {
-                                albumsByArtist.chunked(2).forEach { rowAlbums ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        rowAlbums.forEach { album ->
-                                            AlbumCard(
-                                                artist = artist,
-                                                album = album,
-                                                onClick = { /* Navigate to album downloads */ },
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                        // Fill remaining space if odd number of albums
-                                        if (rowAlbums.size < 2) {
-                                            Spacer(modifier = Modifier.weight(1f))
-                                        }
-                                    }
+                                items(albumsByArtist) { album ->
+                                    AlbumCard(
+                                        artist = artist,
+                                        album = album,
+                                        onClick = { /* Navigate to album downloads */ }
+                                    )
                                 }
                             }
                         }
@@ -346,6 +350,47 @@ private fun DownloadItemRow(item: DownloadItem) {
 }
 
 @Composable
+private fun ArtistHeader(artist: String) {
+    val (colorPalette, typography) = LocalAppearance.current
+    val artistData by Database.downloadedArtist(artist).collectAsState(initial = null)
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Artist thumbnail
+        AsyncImage(
+            model = artistData?.thumbnailUrl,
+            contentDescription = null,
+            modifier = Modifier
+                .size(60.dp)
+                .clip(RoundedCornerShape(30.dp))
+                .background(colorPalette.background2),
+            contentScale = ContentScale.Crop
+        )
+        
+        Spacer(modifier = Modifier.size(16.dp))
+        
+        Column {
+            Text(
+                text = artist,
+                style = typography.l.copy(fontWeight = FontWeight.Bold),
+                color = colorPalette.text
+            )
+            
+            val songCount by Database.downloadedSongsByArtist(artist).collectAsState(initial = emptyList())
+            Text(
+                text = "${songCount.size} songs",
+                style = typography.s,
+                color = colorPalette.textSecondary
+            )
+        }
+    }
+}
+
+@Composable
 private fun AlbumCard(
     artist: String,
     album: String,
@@ -356,124 +401,80 @@ private fun AlbumCard(
     
     // Get first song by this artist and album for thumbnail
     val albumSongs by Database.downloadedSongsByArtistAndAlbum(artist, album).collectAsState(initial = emptyList())
-    val thumbnailUrl = albumSongs.firstOrNull()?.thumbnailUrl
+    val firstSong = albumSongs.firstOrNull()
+    val thumbnailUrl = firstSong?.albumThumbnailUrl ?: firstSong?.thumbnailUrl
     
     Card(
         modifier = modifier
-            .height(120.dp)
-            .clickable { onClick() }
+            .height(200.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp)
     ) {
-        Box(
+        Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Background image
-            AsyncImage(
-                model = thumbnailUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(8.dp))
-            )
-            
-            // Gradient overlay
+            // Album cover
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        color = Color.Black.copy(alpha = 0.4f),
-                        shape = RoundedCornerShape(8.dp)
+                    .fillMaxWidth()
+                    .height(150.dp)
+            ) {
+                AsyncImage(
+                    model = thumbnailUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(colorPalette.background2)
+                )
+                
+                // Play button overlay (Apple Music style)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.3f))
+                        .clickable { onClick() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.play),
+                        contentDescription = "Play",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
                     )
-            )
+                }
+            }
             
             // Album info
             Column(
                 modifier = Modifier
-                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
                     .padding(12.dp)
             ) {
                 Text(
                     text = album,
-                    style = typography.s.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White,
+                    style = typography.s.copy(fontWeight = FontWeight.SemiBold),
+                    color = colorPalette.text,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                
                 Text(
-                    text = "${albumSongs.size} ${if (albumSongs.size == 1) "song" else "songs"}",
+                    text = "${albumSongs.size} songs",
                     style = typography.xs,
-                    color = Color.White.copy(alpha = 0.8f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    color = colorPalette.textSecondary,
+                    maxLines = 1
                 )
             }
         }
     }
 }
 
-@Composable
-private fun ArtistCard(
-    artist: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val (colorPalette, typography) = LocalAppearance.current
-    
-    // Get first song by this artist for thumbnail
-    val firstSong by Database.downloadedSongsByArtist(artist).collectAsState(initial = emptyList())
-    val thumbnailUrl = firstSong.firstOrNull()?.thumbnailUrl
-    
-    Card(
-        modifier = modifier
-            .height(120.dp)
-            .clickable { onClick() }
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // Background image
-            AsyncImage(
-                model = thumbnailUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(8.dp))
-            )
-            
-            // Gradient overlay
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        color = Color.Black.copy(alpha = 0.4f),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-            )
-            
-            // Artist name
-            Text(
-                text = artist,
-                style = typography.s.copy(fontWeight = FontWeight.Bold),
-                color = Color.White,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(12.dp)
-            )
-        }
-    }
-}
-
 private fun formatFileSize(bytes: Long): String {
-    val kb = bytes / 1024.0
-    val mb = kb / 1024.0
-    val gb = mb / 1024.0
-    
     return when {
-        gb >= 1 -> "%.1f GB".format(gb)
-        mb >= 1 -> "%.1f MB".format(mb)
-        else -> "%.1f KB".format(kb)
+        bytes >= 1024 * 1024 * 1024 -> "%.1f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
+        bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
+        bytes >= 1024 -> "%.1f KB".format(bytes / 1024.0)
+        else -> "$bytes B"
     }
 }
