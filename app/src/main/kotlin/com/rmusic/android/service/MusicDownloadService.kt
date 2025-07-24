@@ -266,58 +266,25 @@ class MusicDownloadService : InvincibleService() {
                     
                     // IMMEDIATELY download album cover and artist thumbnail after song download
                     scope.launch {
-                        // Download album cover if available - use KDownloader provider instead of HttpClient
-                        val albumCoverUrl = downloadItem.thumbnailUrl 
-                            ?: originalSong?.thumbnailUrl 
-                            ?: albumInfo?.let { 
-                                try {
-                                    Database.album(it.id).first()?.thumbnailUrl
+                        // Download album cover if available
+                        albumInfo?.let { info ->
+                            val albumCoverUrl = downloadItem.thumbnailUrl
+                                ?: originalSong?.thumbnailUrl
+                                ?: try {
+                                    Database.album(info.id).first()?.thumbnailUrl
                                 } catch (e: Exception) {
                                     null
                                 }
+
+                            albumCoverUrl?.let { thumbnailUrl ->
+                                android.util.Log.d(TAG, "Queueing album cover download: $thumbnailUrl")
+                                downloadAlbumCoverWithKDownloader(info.id, thumbnailUrl, file.parentFile, "cover.jpg")
                             }
-                        
-                        albumCoverUrl?.let { thumbnailUrl ->
-                            android.util.Log.d(TAG, "Downloading album cover via KDownloader: $thumbnailUrl")
-                            downloadAlbumCoverWithKDownloader(thumbnailUrl, file.parentFile, "cover.jpg")
                         }
                         
-                        // Download artist thumbnail - get actual artist profile image
-                        finalArtistsInfo.firstOrNull()?.let { artistInfo: com.rmusic.android.models.Info ->
-                            try {
-                                val artistThumbnailUrl: String? = if (artistInfo.id.startsWith("fallback_")) {
-                                    null // No thumbnail for fallback artists
-                                } else {
-                                    // Try to get artist thumbnail from database first
-                                    val dbArtist = Database.artist(artistInfo.id).first()
-                                    if (dbArtist?.thumbnailUrl != null) {
-                                        dbArtist.thumbnailUrl
-                                    } else {
-                                        // If not in database, try to fetch from Innertube
-                                        android.util.Log.d(TAG, "Fetching artist thumbnail from Innertube for: ${artistInfo.name}")
-                                        try {
-                                            val artistPageResult = Innertube.artistPage(
-                                                BrowseBody(browseId = artistInfo.id)
-                                            )?.getOrNull()
-                                            val thumbnailUrl = artistPageResult?.thumbnail?.url
-                                            if (thumbnailUrl != null) {
-                                                android.util.Log.d(TAG, "Found artist thumbnail URL: $thumbnailUrl")
-                                            }
-                                            thumbnailUrl
-                                        } catch (e: Exception) {
-                                            android.util.Log.w(TAG, "Failed to fetch artist thumbnail from Innertube", e)
-                                            null
-                                        }
-                                    }
-                                }
-                                
-                                artistThumbnailUrl?.let { thumbnailUrl: String ->
-                                    android.util.Log.d(TAG, "Downloading artist thumbnail via KDownloader: $thumbnailUrl")
-                                    downloadArtistThumbnailWithKDownloader(thumbnailUrl, file.parentFile?.parentFile, "artist.jpg")
-                                }
-                            } catch (e: Exception) {
-                                android.util.Log.w(TAG, "Error processing artist thumbnail", e)
-                            }
+                        // Download artist thumbnail
+                        finalArtistsInfo.firstOrNull()?.let { artistInfo ->
+                            processAndDownloadArtistThumbnail(artistInfo, file.parentFile?.parentFile)
                         }
                     }
                     
@@ -404,38 +371,74 @@ class MusicDownloadService : InvincibleService() {
         }
     }
     
-    private suspend fun downloadAlbumCoverWithKDownloader(thumbnailUrl: String, albumDir: File?, filename: String) {
+    private suspend fun processAndDownloadArtistThumbnail(artistInfo: com.rmusic.android.models.Info, artistDir: File?) {
+        if (artistDir == null || artistInfo.id.startsWith("fallback_")) return
+
+        val artistId = artistInfo.id
+        if (ongoingArtistArtDownloads.contains(artistId)) {
+            android.util.Log.d(TAG, "Artist thumbnail processing already in progress for $artistId")
+            return
+        }
+
+        val thumbnailFile = File(artistDir, "artist.jpg")
+        if (thumbnailFile.exists()) {
+            android.util.Log.d(TAG, "Artist thumbnail already exists for $artistId")
+            return
+        }
+
+        ongoingArtistArtDownloads.add(artistId)
+        try {
+            val dbArtist = Database.artist(artistId).firstOrNull()
+            var artistThumbnailUrl = dbArtist?.thumbnailUrl
+
+            if (artistThumbnailUrl == null) {
+                android.util.Log.d(TAG, "Fetching artist thumbnail from Innertube for: ${artistInfo.name}")
+                try {
+                    val artistPageResult = Innertube.artistPage(BrowseBody(browseId = artistId))?.getOrNull()
+                    artistThumbnailUrl = artistPageResult?.thumbnail?.url
+                    if (artistThumbnailUrl != null) {
+                        android.util.Log.d(TAG, "Found artist thumbnail URL: $artistThumbnailUrl")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "Failed to fetch artist thumbnail from Innertube", e)
+                }
+            }
+
+            artistThumbnailUrl?.let { thumbnailUrl ->
+                android.util.Log.d(TAG, "Queueing artist thumbnail download: $thumbnailUrl")
+                downloadArtistThumbnailWithKDownloader(thumbnailUrl, artistDir, "artist.jpg")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Error processing artist thumbnail for $artistId", e)
+        } finally {
+            ongoingArtistArtDownloads.remove(artistId)
+        }
+    }
+
+    private suspend fun downloadAlbumCoverWithKDownloader(albumId: String, thumbnailUrl: String, albumDir: File?, filename: String) {
         if (albumDir == null) {
             android.util.Log.w(TAG, "Album directory is null, cannot download cover")
             return
         }
         
-        val albumId = albumDir.name
         if (ongoingAlbumArtDownloads.contains(albumId)) {
             android.util.Log.d(TAG, "Album cover download already in progress for $albumId")
             return
         }
         
+        ongoingAlbumArtDownloads.add(albumId)
         try {
-            ongoingAlbumArtDownloads.add(albumId)
-            // Ensure directory exists
             if (!albumDir.exists()) {
                 albumDir.mkdirs()
-                android.util.Log.d(TAG, "Created album directory: ${albumDir.absolutePath}")
             }
             
             val coverFile = File(albumDir, filename)
             if (coverFile.exists()) {
-                android.util.Log.d(TAG, "Album cover already exists: ${coverFile.absolutePath}")
                 return
             }
             
-            // Apply high-resolution transformation before downloading
             val highResUrl = thumbnailUrl.thumbnail(1280) ?: thumbnailUrl
             
-            android.util.Log.d(TAG, "Downloading album cover via KDownloader from: $highResUrl to: ${coverFile.absolutePath}")
-            
-            // Use KDownloader provider for thumbnail downloads
             val kdownloadProvider = KDownloadProvider(this@MusicDownloadService)
             
             try {
@@ -445,32 +448,19 @@ class MusicDownloadService : InvincibleService() {
                     filename = filename,
                     url = highResUrl
                 ).collect { state ->
-                    when (state) {
-                        is DownloadState.Completed -> {
-                            android.util.Log.d(TAG, "Album cover downloaded successfully via KDownloader: ${state.filePath}")
-                        }
-                        is DownloadState.Failed -> {
-                            throw Exception("KDownloader failed: ${state.error}")
-                        }
-                        else -> {
-                            // Download in progress
-                        }
+                    if (state is DownloadState.Failed) {
+                        throw state.error
                     }
                 }
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "KDownloader failed for album cover, fallback to HttpClient", e)
-                // Fallback to HttpClient if KDownloader fails - also use high res URL
                 val response = httpClient.get(highResUrl)
                 if (response.status.isSuccess()) {
-                    val bytes = response.readRawBytes()
-                    coverFile.writeBytes(bytes)
-                    android.util.Log.d(TAG, "Album cover saved via HttpClient fallback: ${coverFile.absolutePath} (${bytes.size} bytes)")
-                } else {
-                    android.util.Log.e(TAG, "Failed to download album cover, HTTP status: ${response.status}")
+                    coverFile.writeBytes(response.readRawBytes())
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to download album cover", e)
+            android.util.Log.e(TAG, "Failed to download album cover for $albumId", e)
         } finally {
             ongoingAlbumArtDownloads.remove(albumId)
         }
@@ -478,36 +468,21 @@ class MusicDownloadService : InvincibleService() {
     
     private suspend fun downloadArtistThumbnailWithKDownloader(thumbnailUrl: String, artistDir: File?, filename: String) {
         if (artistDir == null) {
-            android.util.Log.w(TAG, "Artist directory is null, cannot download thumbnail")
             return
         }
 
-        val artistId = artistDir.name
-        if (ongoingArtistArtDownloads.contains(artistId)) {
-            android.util.Log.d(TAG, "Artist thumbnail download already in progress for $artistId")
-            return
-        }
-        
         try {
-            ongoingArtistArtDownloads.add(artistId)
-            // Ensure directory exists
             if (!artistDir.exists()) {
                 artistDir.mkdirs()
-                android.util.Log.d(TAG, "Created artist directory: ${artistDir.absolutePath}")
             }
             
             val thumbnailFile = File(artistDir, filename)
             if (thumbnailFile.exists()) {
-                android.util.Log.d(TAG, "Artist thumbnail already exists: ${thumbnailFile.absolutePath}")
                 return
             }
             
-            // Apply high-resolution transformation before downloading
             val highResUrl = thumbnailUrl.thumbnail(1280) ?: thumbnailUrl
             
-            android.util.Log.d(TAG, "Downloading artist thumbnail via KDownloader from: $highResUrl to: ${thumbnailFile.absolutePath}")
-            
-            // Use KDownloader provider for thumbnail downloads
             val kdownloadProvider = KDownloadProvider(this@MusicDownloadService)
             
             try {
@@ -517,34 +492,19 @@ class MusicDownloadService : InvincibleService() {
                     filename = filename,
                     url = highResUrl
                 ).collect { state ->
-                    when (state) {
-                        is DownloadState.Completed -> {
-                            android.util.Log.d(TAG, "Artist thumbnail downloaded successfully via KDownloader: ${state.filePath}")
-                        }
-                        is DownloadState.Failed -> {
-                            throw Exception("KDownloader failed: ${state.error}")
-                        }
-                        else -> {
-                            // Download in progress
-                        }
+                     if (state is DownloadState.Failed) {
+                        throw state.error
                     }
                 }
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "KDownloader failed for artist thumbnail, fallback to HttpClient", e)
-                // Fallback to HttpClient if KDownloader fails - also use high res URL
                 val response = httpClient.get(highResUrl)
                 if (response.status.isSuccess()) {
-                    val bytes = response.readRawBytes()
-                    thumbnailFile.writeBytes(bytes)
-                    android.util.Log.d(TAG, "Artist thumbnail saved via HttpClient fallback: ${thumbnailFile.absolutePath} (${bytes.size} bytes)")
-                } else {
-                    android.util.Log.e(TAG, "Failed to download artist thumbnail, HTTP status: ${response.status}")
+                    thumbnailFile.writeBytes(response.readRawBytes())
                 }
             }
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Failed to download artist thumbnail", e)
-        } finally {
-            ongoingArtistArtDownloads.remove(artistId)
         }
     }
     
