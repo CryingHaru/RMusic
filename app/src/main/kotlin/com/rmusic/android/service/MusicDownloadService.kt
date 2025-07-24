@@ -66,6 +66,8 @@ class MusicDownloadService : InvincibleService() {
     private lateinit var downloadManager: DownloadManager
     private lateinit var notificationManager: NotificationManager
     private var currentActiveDownloads: List<DownloadItem> = emptyList()
+    private val ongoingAlbumArtDownloads = mutableSetOf<String>()
+    private val ongoingArtistArtDownloads = mutableSetOf<String>()
     
     private val httpClient = HttpClient(OkHttp) {
         expectSuccess = false // Allow handling of non-success responses
@@ -408,7 +410,14 @@ class MusicDownloadService : InvincibleService() {
             return
         }
         
+        val albumId = albumDir.name
+        if (ongoingAlbumArtDownloads.contains(albumId)) {
+            android.util.Log.d(TAG, "Album cover download already in progress for $albumId")
+            return
+        }
+        
         try {
+            ongoingAlbumArtDownloads.add(albumId)
             // Ensure directory exists
             if (!albumDir.exists()) {
                 albumDir.mkdirs()
@@ -462,6 +471,8 @@ class MusicDownloadService : InvincibleService() {
             }
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Failed to download album cover", e)
+        } finally {
+            ongoingAlbumArtDownloads.remove(albumId)
         }
     }
     
@@ -470,8 +481,15 @@ class MusicDownloadService : InvincibleService() {
             android.util.Log.w(TAG, "Artist directory is null, cannot download thumbnail")
             return
         }
+
+        val artistId = artistDir.name
+        if (ongoingArtistArtDownloads.contains(artistId)) {
+            android.util.Log.d(TAG, "Artist thumbnail download already in progress for $artistId")
+            return
+        }
         
         try {
+            ongoingArtistArtDownloads.add(artistId)
             // Ensure directory exists
             if (!artistDir.exists()) {
                 artistDir.mkdirs()
@@ -525,6 +543,8 @@ class MusicDownloadService : InvincibleService() {
             }
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Failed to download artist thumbnail", e)
+        } finally {
+            ongoingArtistArtDownloads.remove(artistId)
         }
     }
     
