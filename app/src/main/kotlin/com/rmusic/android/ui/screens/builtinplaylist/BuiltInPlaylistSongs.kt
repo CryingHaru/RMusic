@@ -38,6 +38,7 @@ import com.rmusic.android.ui.components.themed.ValueSelectorDialog
 import com.rmusic.android.ui.items.SongItem
 import com.rmusic.android.ui.screens.home.HeaderSongSortBy
 import com.rmusic.android.utils.PlaylistDownloadIcon
+import com.rmusic.android.utils.PlaylistDownloadIconSpecific
 import com.rmusic.android.utils.asMediaItem
 import com.rmusic.android.utils.enqueue
 import com.rmusic.android.utils.forcePlayAtIndex
@@ -152,7 +153,14 @@ fun BuiltInPlaylistSongs(
 
                     Spacer(modifier = Modifier.weight(1f))
 
-                    if (builtInPlaylist != BuiltInPlaylist.Offline) PlaylistDownloadIcon(
+                    if (builtInPlaylist != BuiltInPlaylist.Offline) PlaylistDownloadIconSpecific(
+                        playlistId = "builtin_${builtInPlaylist.name.lowercase()}",
+                        playlistName = when (builtInPlaylist) {
+                            BuiltInPlaylist.Favorites -> stringResource(R.string.favorites)
+                            BuiltInPlaylist.Top -> stringResource(R.string.format_my_top_playlist, topListLength)
+                            BuiltInPlaylist.History -> stringResource(R.string.history)
+                            else -> stringResource(R.string.unknown)
+                        },
                         songs = songs.map(Song::asMediaItem).toImmutableList()
                     )
 

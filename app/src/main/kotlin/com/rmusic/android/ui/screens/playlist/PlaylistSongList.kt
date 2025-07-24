@@ -47,6 +47,7 @@ import com.rmusic.android.ui.components.themed.adaptiveThumbnailContent
 import com.rmusic.android.ui.items.SongItem
 import com.rmusic.android.ui.items.SongItemPlaceholder
 import com.rmusic.android.utils.PlaylistDownloadIcon
+import com.rmusic.android.utils.PlaylistDownloadIconSpecific
 import com.rmusic.android.utils.asMediaItem
 import com.rmusic.android.utils.completed
 import com.rmusic.android.utils.enqueue
@@ -144,7 +145,13 @@ fun PlaylistSongList(
             Spacer(modifier = Modifier.weight(1f))
 
             playlistPage?.songsPage?.items?.map(Innertube.SongItem::asMediaItem)
-                ?.let { PlaylistDownloadIcon(songs = it.toImmutableList()) }
+                ?.let { mediaItems ->
+                    PlaylistDownloadIconSpecific(
+                        playlistId = browseId,
+                        playlistName = playlistPage?.title ?: "Unknown Playlist",
+                        songs = mediaItems.toImmutableList()
+                    )
+                }
 
             HeaderIconButton(
                 icon = R.drawable.add,

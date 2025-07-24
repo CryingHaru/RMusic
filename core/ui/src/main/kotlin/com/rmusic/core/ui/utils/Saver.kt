@@ -27,6 +27,13 @@ inline fun <reified T : Parcelable> stateListSaver() = listSaver<SnapshotStateLi
 )
 
 inline fun <reified E : Enum<E>> enumSaver() = object : Saver<E, String> {
-    override fun restore(value: String) = enumValues<E>().first { it.name == value }
+    override fun restore(value: String): E {
+        return try {
+            enumValues<E>().firstOrNull { it.name == value } ?: enumValues<E>().first()
+        } catch (e: Exception) {
+            // Fallback to the first enum value in case of any other error
+            enumValues<E>().first()
+        }
+    }
     override fun SaverScope.save(value: E) = value.name
 }

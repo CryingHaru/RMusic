@@ -19,6 +19,7 @@ import androidx.compose.ui.res.stringResource
 import com.rmusic.android.LocalPlayerAwareWindowInsets
 import com.rmusic.android.LocalPlayerServiceBinder
 import com.rmusic.android.R
+import com.rmusic.android.models.Album
 import com.rmusic.android.models.Song
 import com.rmusic.android.ui.components.LocalMenuState
 import com.rmusic.android.ui.components.ShimmerHost
@@ -28,7 +29,7 @@ import com.rmusic.android.ui.components.themed.NonQueuedMediaItemMenu
 import com.rmusic.android.ui.components.themed.SecondaryTextButton
 import com.rmusic.android.ui.items.SongItem
 import com.rmusic.android.ui.items.SongItemPlaceholder
-import com.rmusic.android.utils.PlaylistDownloadIcon
+import com.rmusic.android.utils.AlbumDownloadIcon
 import com.rmusic.android.utils.asMediaItem
 import com.rmusic.android.utils.enqueue
 import com.rmusic.android.utils.forcePlayAtIndex
@@ -39,12 +40,14 @@ import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.utils.isLandscape
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
+import com.rmusic.android.service.MusicDownloadService
 
 // TODO: migrate to single impl for all 'song lists'
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AlbumSongs(
     songs: ImmutableList<Song>,
+    album: Album?,
     headerContent: @Composable (
         beforeContent: (@Composable () -> Unit)?,
         afterContent: (@Composable () -> Unit)?
@@ -89,9 +92,15 @@ fun AlbumSongs(
                             )
                         },
                         {
-                            PlaylistDownloadIcon(
-                                songs = songs.map(Song::asMediaItem).toImmutableList()
-                            )
+                            album?.id?.let { albumId ->
+                                album.title?.let { albumName ->
+                                    AlbumDownloadIcon(
+                                        songs = songs.map(Song::asMediaItem).toImmutableList(),
+                                        albumId = albumId,
+                                        albumName = albumName
+                                    )
+                                }
+                            }
                         }
                     )
 

@@ -42,19 +42,39 @@
     <string name="download_description">Manage your downloaded music and download settings</string>
     <string name="downloaded_music">Downloaded Music</string>
     <string name="format_downloads_info">%1$d songs • %2$s</string>
+    
+    <!-- New strings for playlist and album downloads -->
+    <string name="download_playlist">Download Playlist</string>
+    <string name="download_album">Download Album</string>
+    <string name="downloading_playlist">Downloading playlist: %1$s</string>
+    <string name="downloading_album">Downloading album: %1$s</string>
+    <string name="playlist_download_started">Playlist download started</string>
+    <string name="album_download_started">Album download started</string>
+    <string name="downloading_playlist_songs">Downloading %1$d songs from playlist</string>
+    <string name="downloading_album_songs">Downloading %1$d songs from album</string>
+    <string name="downloads_active">%1$d downloads active</string>
+    <string name="downloads_in_progress_count">%1$d downloads in progress</string>
+    <string name="downloading_title">Downloading: %1$s</string>
+    <string name="queued_title">Queued: %1$s</string>
+    <string name="paused_title">Paused: %1$s</string>
+    <string name="download_service">Download Service</string>
+    
     <string name="clear_all">Clear all</string>
     <string name="storage_location">Storage Location</string>
     <string name="download_location_description">Music/Downloads folder</string>
     <string name="download_quality">Download Quality</string>
-    <string name="download_quality_description">High quality (320kbps)</string>
+    <string name="download_quality_description">Best available quality (~160kbps AAC)</string>
     <string name="download_behavior">Download Behavior</string>
     <string name="wifi_only_downloads">Wi-Fi only downloads</string>
     <string name="wifi_only_downloads_description">Only download when connected to Wi-Fi</string>
     <string name="organize_by_artist">Organize by artist</string>
     <string name="organize_by_artist_description">Create Artist/Album folder structure</string>
-    <string name="low_quality">Low (128 kbps)</string>
-    <string name="medium_quality">Medium (192 kbps)</string>
-    <string name="high_quality">High (320 kbps)</string>
+    <string name="auto_download_at_half">Auto-download at 50%</string>
+    <string name="auto_download_at_half_description">Automatically download songs when played to 50%</string>
+    <string name="auto_download_started">Auto-downloading: %s</string>
+    <string name="storage_limit_reached_message">Auto-download paused: Device storage is 95% full</string>
+    <string name="auto_download_disabled_storage_full">Auto-download disabled: Storage is 95% full. Free up space to re-enable.</string>
+    <string name="high_quality">Best available (~160 kbps AAC)</string>
     <string name="download">Download</string>
     <string name="active_downloads">Active downloads</string>
     <string name="queued">Queued</string>
@@ -187,15 +207,15 @@
     <string name="view_album">View album</string>
     <string name="view_playlist">View playlist</string>
     <string name="search_placeholder">Search…</string>
-    <string name="format_version_credits">v%1$s by Huizengek &amp; vfsfitvnm</string>
+    <string name="format_version_credits">RMusic v%1$s - Based on ViTune by Huizengek &amp; vfsfitvnm</string>
     <string name="social">Social</string>
     <string name="contact">Contact</string>
     <string name="github">GitHub</string>
     <string name="view_source">View the source code</string>
     <string name="report_bug">Report an issue</string>
-    <string name="report_bug_description">If you need help with a bug you can file an issue on GitHub (click to redirect)</string>
+    <string name="report_bug_description">If you need help with a bug you can file an issue on the RMusic GitHub repository (click to redirect)</string>
     <string name="request_feature">Request a feature or suggest an idea</string>
-    <string name="redirect_github">You will be redirected to GitHub</string>
+    <string name="redirect_github">You will be redirected to the RMusic GitHub repository</string>
     <string name="color_source">Accent color source</string>
     <string name="color_source_default">Default</string>
     <string name="color_source_dynamic">Dynamic</string>
@@ -377,7 +397,7 @@
     <string name="version">Version</string>
     <string name="check_new_version">Check for updates</string>
     <string name="current_version">You\'re currently running version v%1$s</string>
-    <string name="error_github">An unknown error occurred while fetching data from GitHub</string>
+    <string name="error_github">An unknown error occurred while fetching data from the RMusic GitHub repository</string>
     <string name="new_version_available">A new version is available</string>
     <string name="more_information">More information</string>
     <string name="up_to_date">You\'re currently up-to-date: no updates available</string>
@@ -439,4 +459,9 @@
     <string name="cleanup_confirmation">Are you sure you want to cleanup old files?</string>
     <string name="cancel_all_confirmation">Are you sure you want to cancel all downloads?</string>
     <string name="cancel_all">Cancel All</string>
+    
+    <!-- Download notification strings -->
+    <string name="download_in_progress">Download in progress...</string>
+    <string name="unknown_artist">Unknown Artist</string>
+    <string name="preparing_downloads">Preparing downloads...</string>
 </resources>

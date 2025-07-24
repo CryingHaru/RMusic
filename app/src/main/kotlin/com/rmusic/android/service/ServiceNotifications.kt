@@ -178,4 +178,11 @@ object ServiceNotifications : NotificationChannels() {
     ) {
         setLightsEnabled(true).setVibrationEnabled(true)
     }
+
+    val autoDownloadDebug by channel(
+        name = "auto_download_debug",
+        description = R.string.auto_download_at_half,
+        importance = NotificationManagerCompat.IMPORTANCE_LOW,
+        singleNotification = true
+    )
 }

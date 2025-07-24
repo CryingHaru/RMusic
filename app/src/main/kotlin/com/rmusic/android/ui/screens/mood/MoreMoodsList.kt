@@ -1,8 +1,11 @@
 package com.rmusic.android.ui.screens.mood
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
@@ -18,21 +21,33 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
+import coil3.compose.AsyncImage
 import com.rmusic.android.LocalPlayerAwareWindowInsets
 import com.rmusic.android.R
 import com.rmusic.android.ui.components.ShimmerHost
 import com.rmusic.android.ui.components.themed.Header
 import com.rmusic.android.ui.components.themed.HeaderPlaceholder
+import com.rmusic.android.ui.items.ItemContainer
 import com.rmusic.android.ui.items.SongItemPlaceholder
-import com.rmusic.android.ui.screens.home.MoodItem
+import com.rmusic.android.utils.center
+import com.rmusic.android.utils.color
 import com.rmusic.android.utils.semiBold
+import com.rmusic.android.utils.thumbnail
 import com.rmusic.compose.persist.persist
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
+import com.rmusic.core.ui.onOverlay
+import com.rmusic.core.ui.overlay
+import com.rmusic.core.ui.utils.px
+import com.rmusic.core.ui.utils.roundedShape
 import com.rmusic.providers.innertube.Innertube
 import com.rmusic.providers.innertube.models.bodies.BrowseBody
 import com.rmusic.providers.innertube.requests.BrowseResult
@@ -115,13 +130,46 @@ fun MoreMoodsList(
                     items = moods,
                     key = { j, item -> "item:$j,${item.key}" }
                 ) { _, mood ->
-                    MoodItem(
-                        mood = mood,
-                        onClick = { mood.endpoint.browseId?.let { _ -> onMoodClick(mood) } },
+                    ItemContainer(
+                        alternative = true,
+                        thumbnailSize = Dimensions.thumbnails.album,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(4.dp)
-                    )
+                            .clickable { mood.endpoint.browseId?.let { _ -> onMoodClick(mood) } }
+                    ) { centeredModifier ->
+                        val (colorPalette, typography, thumbnailShapeCorners) = LocalAppearance.current
+
+                        Box(
+                            modifier = centeredModifier
+                                .clip(thumbnailShapeCorners.roundedShape)
+                                .background(color = colorPalette.background1)
+                        ) {
+                            // Mood items don't have thumbnails, use a color-based background
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .aspectRatio(1f)
+                                    .background(androidx.compose.ui.graphics.Color(mood.stripeColor))
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(colorPalette.overlay)
+                            )
+
+                            BasicText(
+                                text = mood.title ?: "Unknown Mood",
+                                style = typography.m.semiBold.center.color(colorPalette.onOverlay),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(8.dp)
+                            )
+                        }
+                    }
                 }
             }
         }

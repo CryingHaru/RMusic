@@ -47,7 +47,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.collectAsState
 import androidx.media3.common.Player
+import androidx.media3.common.C
 import com.rmusic.android.Database
 import com.rmusic.android.LocalPlayerServiceBinder
 import com.rmusic.android.R
@@ -55,6 +59,7 @@ import com.rmusic.android.models.Info
 import com.rmusic.android.models.ui.UiMedia
 import com.rmusic.android.preferences.PlayerPreferences
 import com.rmusic.android.service.PlayerService
+import com.rmusic.android.service.MusicDownloadService
 import com.rmusic.android.ui.components.FadingRow
 import com.rmusic.android.ui.components.SeekBar
 import com.rmusic.android.ui.components.themed.BigIconButton
@@ -65,12 +70,21 @@ import com.rmusic.android.utils.forceSeekToNext
 import com.rmusic.android.utils.forceSeekToPrevious
 import com.rmusic.android.utils.secondary
 import com.rmusic.android.utils.semiBold
+import com.rmusic.android.utils.isDownloaded
+import com.rmusic.android.utils.toast
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.favoritesIcon
 import com.rmusic.core.ui.utils.px
 import com.rmusic.core.ui.utils.roundedShape
+import com.rmusic.providers.innertube.Innertube
+import com.rmusic.providers.innertube.models.bodies.PlayerBody
+import com.rmusic.providers.innertube.requests.player
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 
 private val DefaultOffset = 24.dp
 
@@ -363,9 +377,19 @@ private fun PlayButton(
 @Composable
 private fun MediaInfo(media: UiMedia) {
     val (colorPalette, typography) = LocalAppearance.current
+    val context = LocalContext.current
+    val binder = LocalPlayerServiceBinder.current
+    val scope = rememberCoroutineScope()
 
     var artistInfo: List<Info>? by remember { mutableStateOf(null) }
     var maxHeight by rememberSaveable { mutableIntStateOf(0) }
+
+    // Check if song is downloaded
+    val isDownloaded = isDownloaded(media.id)
+    
+    // Get like state from database
+    val likedAt by Database.likedAt(media.id).collectAsState(initial = null)
+    val isLiked = likedAt != null
 
     LaunchedEffect(media) {
         withContext(Dispatchers.IO) {
@@ -376,18 +400,97 @@ private fun MediaInfo(media: UiMedia) {
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        AnimatedContent(
-            targetState = media.title,
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
-            label = ""
-        ) { title ->
-            FadingRow(modifier = Modifier.fillMaxWidth(0.75f)) {
-                BasicText(
-                    text = title,
-                    style = typography.l.bold,
-                    maxLines = 1
-                )
+        // Título con botones de like y descarga
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Botón de descarga (muestra check si ya está descargado)
+            IconButton(
+                icon = if (isDownloaded) R.drawable.check else R.drawable.download,
+                color = if (isDownloaded) Color(0xFF4CAF50) else colorPalette.text,
+                onClick = {
+                    if (!isDownloaded) {
+                        // Iniciar descarga usando la lógica simplificada
+                        val lifecycleOwner = context as? LifecycleOwner
+                        lifecycleOwner?.lifecycleScope?.launch {
+                            try {
+                                // Resolver la URL de streaming
+                                val videoId = media.id.removePrefix("https://youtube.com/watch?v=")
+                                val playerResponse = Innertube.player(
+                                    PlayerBody(videoId = videoId)
+                                )?.getOrNull()
+                                
+                                val streamingUrl = playerResponse?.streamingData?.adaptiveFormats
+                                    ?.filter { it.mimeType?.startsWith("audio/") == true }
+                                    ?.maxByOrNull { it.bitrate ?: 0 }
+                                    ?.url
+                                
+                                if (streamingUrl != null) {
+                                    MusicDownloadService.download(
+                                        context = context.applicationContext,
+                                        trackId = media.id,
+                                        title = media.title,
+                                        artist = media.artist,
+                                        album = null,
+                                        thumbnailUrl = null,
+                                        duration = null,
+                                        url = streamingUrl
+                                    )
+                                    
+                                    withContext(Dispatchers.Main) {
+                                        context.toast(context.getString(R.string.auto_download_started, media.title))
+                                    }
+                                } else {
+                                    withContext(Dispatchers.Main) {
+                                        context.toast("Unable to get download URL")
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("MediaInfo", "Error starting download", e)
+                                withContext(Dispatchers.Main) {
+                                    context.toast("Download failed: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.size(24.dp)
+            )
+            
+            // Título centrado
+            AnimatedContent(
+                targetState = media.title,
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                label = "",
+                modifier = Modifier.weight(1f)
+            ) { title ->
+                FadingRow(modifier = Modifier.fillMaxWidth()) {
+                    BasicText(
+                        text = title,
+                        style = typography.l.bold.copy(textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+                        maxLines = 1,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
+            
+            // Botón de like
+            IconButton(
+                icon = if (isLiked) R.drawable.heart else R.drawable.heart_outline,
+                color = if (isLiked) colorPalette.favoritesIcon else colorPalette.text,
+                onClick = {
+                    // Toggle like state
+                    scope.launch {
+                        Database.like(
+                            songId = media.id,
+                            likedAt = if (isLiked) null else System.currentTimeMillis()
+                        )
+                    }
+                },
+                modifier = Modifier.size(24.dp)
+            )
         }
 
         AnimatedContent(

@@ -31,6 +31,7 @@ import com.rmusic.android.models.Format
 import com.rmusic.android.service.LOCAL_KEY_PREFIX
 import com.rmusic.android.service.PlayerService
 import com.rmusic.android.service.PrecacheService
+import com.rmusic.android.service.MusicDownloadService
 import com.rmusic.android.service.downloadState as musicDownloadState
 import com.rmusic.android.ui.components.themed.CircularProgressIndicator
 import com.rmusic.android.ui.components.themed.HeaderIconButton
@@ -68,9 +69,127 @@ fun PlaylistDownloadIcon(
                 icon = R.drawable.download,
                 color = colorPalette.text,
                 onClick = {
-                    songs.forEach {
-                        PrecacheService.scheduleCache(context.applicationContext, it)
+                    // Check if this is a playlist or album and download accordingly
+                    val firstSong = songs.firstOrNull()
+                    if (firstSong != null) {
+                        val albumTitle = firstSong.mediaMetadata.albumTitle?.toString()
+                        val playlistId = firstSong.mediaMetadata.extras?.getString("playlistId")
+                        
+                        when {
+                            // If all songs have the same album, treat as album download
+                            !albumTitle.isNullOrBlank() && songs.all { 
+                                it.mediaMetadata.albumTitle?.toString() == albumTitle 
+                            } -> {
+                                MusicDownloadService.downloadAlbum(
+                                    context = context.applicationContext,
+                                    albumId = firstSong.mediaMetadata.extras?.getString("albumId") ?: "unknown_album",
+                                    albumName = albumTitle,
+                                    songs = songs
+                                )
+                            }
+                            // If has playlist ID, treat as playlist download
+                            !playlistId.isNullOrBlank() -> {
+                                MusicDownloadService.downloadPlaylist(
+                                    context = context.applicationContext,
+                                    playlistId = playlistId,
+                                    playlistName = firstSong.mediaMetadata.albumTitle?.toString() ?: "Unknown Playlist",
+                                    songs = songs
+                                )
+                            }
+                            // Fallback to individual song downloads (original behavior)
+                            else -> {
+                                songs.forEach {
+                                    PrecacheService.scheduleCache(context.applicationContext, it)
+                                }
+                            }
+                        }
                     }
+                },
+                modifier = modifier
+            )
+        }
+    }
+}
+
+// New component specifically for album downloads
+@Composable
+fun AlbumDownloadIcon(
+    albumId: String,
+    albumName: String,
+    songs: ImmutableList<MediaItem>,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val (colorPalette) = LocalAppearance.current
+
+    val isDownloading by musicDownloadState.collectAsState()
+
+    AnimatedContent(
+        targetState = isDownloading,
+        label = "",
+        transitionSpec = { fadeIn() togetherWith fadeOut() }
+    ) { currentIsDownloading ->
+        when {
+            currentIsDownloading -> CircularProgressIndicator(modifier = Modifier.size(18.dp))
+
+            !songs.map { it.mediaId }.fastAll {
+                isCached(
+                    mediaId = it,
+                    key = isDownloading
+                )
+            } -> HeaderIconButton(
+                icon = R.drawable.download,
+                color = colorPalette.text,
+                onClick = {
+                    MusicDownloadService.downloadAlbum(
+                        context = context.applicationContext,
+                        albumId = albumId,
+                        albumName = albumName,
+                        songs = songs
+                    )
+                },
+                modifier = modifier
+            )
+        }
+    }
+}
+
+// New component specifically for playlist downloads  
+@Composable
+fun PlaylistDownloadIconSpecific(
+    playlistId: String,
+    playlistName: String,
+    songs: ImmutableList<MediaItem>,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val (colorPalette) = LocalAppearance.current
+
+    val isDownloading by musicDownloadState.collectAsState()
+
+    AnimatedContent(
+        targetState = isDownloading,
+        label = "",
+        transitionSpec = { fadeIn() togetherWith fadeOut() }
+    ) { currentIsDownloading ->
+        when {
+            currentIsDownloading -> CircularProgressIndicator(modifier = Modifier.size(18.dp))
+
+            !songs.map { it.mediaId }.fastAll {
+                isCached(
+                    mediaId = it,
+                    key = isDownloading
+                )
+            } -> HeaderIconButton(
+                icon = R.drawable.download,
+                color = colorPalette.text,
+                onClick = {
+                    MusicDownloadService.downloadPlaylist(
+                        context = context.applicationContext,
+                        playlistId = playlistId,
+                        playlistName = playlistName,
+                        songs = songs
+                    )
                 },
                 modifier = modifier
             )

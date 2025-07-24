@@ -52,9 +52,36 @@ fun HomeArtistList(
 ) = with(OrderPreferences) {
     val (colorPalette) = LocalAppearance.current
 
-    // Get downloaded artists instead of all artists
-    val downloadedArtistsData by Database.downloadedArtistsData().collectAsState(initial = emptyList())
-    val items = downloadedArtistsData.map { it.toArtist() }.toImmutableList()
+    // Get downloaded artists from songs instead of DownloadedArtist table
+    val downloadedArtists by Database.downloadedArtists().collectAsState(initial = emptyList())
+    val downloadedSongs by Database.downloadedSongs().collectAsState(initial = emptyList())
+    
+    // Create artist objects with thumbnails from their songs
+    val items = downloadedArtists.mapNotNull { artistName ->
+        val firstSong = downloadedSongs.find { it.artistsText == artistName }
+        firstSong?.let { song ->
+            // Try to find artist thumbnail first, then fallback to song thumbnail
+            val artistThumbnailUrl = try {
+                val songFile = java.io.File(song.filePath)
+                val artistThumbnail = java.io.File(songFile.parentFile?.parentFile, "artist.jpg")
+                if (artistThumbnail.exists()) {
+                    "file://${artistThumbnail.absolutePath}"
+                } else {
+                    song.thumbnailUrl // Fallback to song thumbnail
+                }
+            } catch (e: Exception) {
+                song.thumbnailUrl // Fallback on error
+            }
+            
+            Artist(
+                id = "downloaded_${artistName.hashCode()}",
+                name = artistName,
+                thumbnailUrl = artistThumbnailUrl,
+                timestamp = song.downloadedAt,
+                bookmarkedAt = null
+            )
+        }
+    }.toImmutableList()
 
     val sortOrderIconRotation by animateFloatAsState(
         targetValue = if (artistSortOrder == SortOrder.Ascending) 0f else 180f,

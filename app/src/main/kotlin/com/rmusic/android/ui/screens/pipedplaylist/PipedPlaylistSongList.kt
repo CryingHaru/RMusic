@@ -36,6 +36,7 @@ import com.rmusic.android.ui.components.themed.adaptiveThumbnailContent
 import com.rmusic.android.ui.items.SongItem
 import com.rmusic.android.ui.items.SongItemPlaceholder
 import com.rmusic.android.utils.PlaylistDownloadIcon
+import com.rmusic.android.utils.PlaylistDownloadIconSpecific
 import com.rmusic.android.utils.asMediaItem
 import com.rmusic.android.utils.enqueue
 import com.rmusic.android.utils.forcePlayAtIndex
@@ -118,7 +119,13 @@ fun PipedPlaylistSongList(
 
                             Spacer(modifier = Modifier.weight(1f))
 
-                            mediaItems?.let { PlaylistDownloadIcon(it) }
+                            mediaItems?.let { items ->
+                                PlaylistDownloadIconSpecific(
+                                    playlistId = playlistId.toString(),
+                                    playlistName = playlist?.name ?: "Unknown Playlist",
+                                    songs = items.toImmutableList()
+                                )
+                            }
                         }
 
                         if (!isLandscape) thumbnailContent()

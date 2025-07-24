@@ -53,6 +53,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.core.net.toUri
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import coil3.compose.AsyncImage
 import com.rmusic.android.Database
 import com.rmusic.android.LocalPlayerAwareWindowInsets
@@ -68,9 +71,12 @@ import com.rmusic.android.ui.components.themed.LinearProgressIndicator
 import com.rmusic.android.ui.components.themed.SecondaryTextButton
 import com.rmusic.android.utils.asMediaItem
 import com.rmusic.android.utils.forcePlay
+import com.rmusic.android.utils.forcePlayFromBeginning
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.utils.px
+import com.rmusic.core.ui.utils.songBundle
+import com.rmusic.core.ui.utils.SongBundleAccessor
 import com.rmusic.download.models.DownloadItem
 import com.rmusic.download.DownloadState
 import com.rmusic.download.DownloadManager
@@ -132,7 +138,13 @@ fun HomeDownloads(onSearchClick: () -> Unit) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 8.dp),
-                        shape = RoundedCornerShape(16.dp)
+                        shape = RoundedCornerShape(16.dp),
+                        colors = androidx.compose.material3.CardDefaults.cardColors(
+                            containerColor = if (colorPalette.isDark) 
+                                colorPalette.background1 
+                            else 
+                                colorPalette.background2
+                        )
                     ) {
                         Row(
                             modifier = Modifier
@@ -185,27 +197,54 @@ fun HomeDownloads(onSearchClick: () -> Unit) {
                     key = { index -> downloadedArtists[index] }
                 ) { index ->
                     val artist = downloadedArtists[index]
+                    val songsByArtist by Database.downloadedSongsByArtist(artist).collectAsState(initial = emptyList())
                     val albumsByArtist by Database.downloadedAlbumsByArtist(artist).collectAsState(initial = emptyList())
                     
-                    if (albumsByArtist.isNotEmpty()) {
+                    if (songsByArtist.isNotEmpty()) {
                         Column(modifier = Modifier.padding(vertical = 8.dp)) {
                             // Artist header with thumbnail
                             ArtistHeader(artist = artist)
 
-                            // Albums grid (Apple Music style)
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(2),
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.height(((albumsByArtist.size / 2 + albumsByArtist.size % 2) * 200 + (albumsByArtist.size / 2) * 12).dp)
-                            ) {
-                                items(albumsByArtist) { album ->
-                                    AlbumCard(
-                                        artist = artist,
-                                        album = album,
-                                        onClick = { /* Navigate to album downloads */ }
-                                    )
+                            // Show albums if available
+                            if (albumsByArtist.isNotEmpty()) {
+                                // Albums grid (Apple Music style)
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(2),
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.height(((albumsByArtist.size / 2 + albumsByArtist.size % 2) * 200 + (albumsByArtist.size / 2) * 12).dp)
+                                ) {
+                                    items(albumsByArtist) { album ->
+                                        AlbumCard(
+                                            artist = artist,
+                                            album = album,
+                                            onClick = { /* Navigate to album downloads */ }
+                                        )
+                                    }
+                                }
+                            } else {
+                                // Show individual songs if no albums
+                                LazyColumn(
+                                    modifier = Modifier.height(200.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp)
+                                ) {
+                                    items(
+                                        count = songsByArtist.take(5).size,
+                                        key = { index -> songsByArtist[index].id }
+                                    ) { index ->
+                                        SongDownloadItem(song = songsByArtist[index])
+                                    }
+                                    if (songsByArtist.size > 5) {
+                                        item {
+                                            Text(
+                                                text = "+${songsByArtist.size - 5} more songs",
+                                                style = typography.s,
+                                                color = colorPalette.textSecondary,
+                                                modifier = Modifier.padding(16.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -250,7 +289,13 @@ private fun ActiveDownloadsSection(downloads: List<DownloadItem>) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = if (colorPalette.isDark) 
+                colorPalette.background1 
+            else 
+                colorPalette.background2
+        )
     ) {
         Column(
             modifier = Modifier.padding(16.dp)
@@ -352,22 +397,51 @@ private fun DownloadItemRow(item: DownloadItem) {
 @Composable
 private fun ArtistHeader(artist: String) {
     val (colorPalette, typography) = LocalAppearance.current
-    val artistData by Database.downloadedArtist(artist).collectAsState(initial = null)
+    // Get the first song by this artist to extract thumbnail info
+    val songsByArtist by Database.downloadedSongsByArtist(artist).collectAsState(initial = emptyList())
+    val firstSong = songsByArtist.firstOrNull()
+    
+    // Try to find artist thumbnail first, then fallback to song thumbnail
+    val artistThumbnailUrl = firstSong?.let { song ->
+        try {
+            val songFile = java.io.File(song.filePath)
+            val artistThumbnail = java.io.File(songFile.parentFile?.parentFile, "artist.jpg")
+            if (artistThumbnail.exists()) {
+                "file://${artistThumbnail.absolutePath}"
+            } else {
+                song.thumbnailUrl // Fallback to song thumbnail
+            }
+        } catch (e: Exception) {
+            song.thumbnailUrl // Fallback on error
+        }
+    }
     
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(
+                color = if (colorPalette.isDark) 
+                    colorPalette.background1 
+                else 
+                    colorPalette.background2,
+                shape = RoundedCornerShape(12.dp)
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Artist thumbnail
+        // Artist thumbnail - use the first song's thumbnail as fallback
         AsyncImage(
-            model = artistData?.thumbnailUrl,
+            model = artistThumbnailUrl,
             contentDescription = null,
             modifier = Modifier
                 .size(60.dp)
                 .clip(RoundedCornerShape(30.dp))
-                .background(colorPalette.background2),
+                .background(
+                    color = if (colorPalette.isDark) 
+                        colorPalette.background2 
+                    else 
+                        colorPalette.background1
+                ),
             contentScale = ContentScale.Crop
         )
         
@@ -380,9 +454,8 @@ private fun ArtistHeader(artist: String) {
                 color = colorPalette.text
             )
             
-            val songCount by Database.downloadedSongsByArtist(artist).collectAsState(initial = emptyList())
             Text(
-                text = "${songCount.size} songs",
+                text = "${songsByArtist.size} songs",
                 style = typography.s,
                 color = colorPalette.textSecondary
             )
@@ -398,6 +471,7 @@ private fun AlbumCard(
     modifier: Modifier = Modifier
 ) {
     val (colorPalette, typography) = LocalAppearance.current
+    val binder = LocalPlayerServiceBinder.current
     
     // Get first song by this artist and album for thumbnail
     val albumSongs by Database.downloadedSongsByArtistAndAlbum(artist, album).collectAsState(initial = emptyList())
@@ -407,8 +481,42 @@ private fun AlbumCard(
     Card(
         modifier = modifier
             .height(200.dp)
-            .clickable { onClick() },
-        shape = RoundedCornerShape(12.dp)
+            .clickable { 
+                // Play the album when clicked
+                if (albumSongs.isNotEmpty()) {
+                    val mediaItems = albumSongs.map { song ->
+                        MediaItem.Builder()
+                            .setMediaMetadata(
+                                MediaMetadata.Builder()
+                                    .setTitle(song.title)
+                                    .setArtist(song.artistsText)
+                                    .setArtworkUri(song.thumbnailUrl?.toUri())
+                                    .setExtras(
+                                        SongBundleAccessor.bundle {
+                                            durationText = song.durationText
+                                            explicit = song.explicit
+                                            albumId = song.albumId
+                                            artistIds = song.artistIds?.split(",")?.map { it.trim() }
+                                        }
+                                    )
+                                    .build()
+                            )
+                            .setMediaId(song.id)
+                            .setUri("file://${song.filePath}".toUri())
+                            .setCustomCacheKey(song.id)
+                            .build()
+                    }
+                    binder?.player?.forcePlayFromBeginning(mediaItems)
+                }
+                onClick()
+            },
+        shape = RoundedCornerShape(12.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = if (colorPalette.isDark) 
+                colorPalette.background1 
+            else 
+                colorPalette.background2
+        )
     ) {
         Column(
             modifier = Modifier.fillMaxSize()
@@ -433,7 +541,34 @@ private fun AlbumCard(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = 0.3f))
-                        .clickable { onClick() },
+                        .clickable { 
+                            // Play the album when play button is clicked
+                            if (albumSongs.isNotEmpty()) {
+                                val mediaItems = albumSongs.map { song ->
+                                    MediaItem.Builder()
+                                        .setMediaMetadata(
+                                            MediaMetadata.Builder()
+                                                .setTitle(song.title)
+                                                .setArtist(song.artistsText)
+                                                .setArtworkUri(song.thumbnailUrl?.toUri())
+                                                .setExtras(
+                                                    SongBundleAccessor.bundle {
+                                                        durationText = song.durationText
+                                                        explicit = song.explicit
+                                                        albumId = song.albumId
+                                                        artistIds = song.artistIds?.split(",")?.map { it.trim() }
+                                                    }
+                                                )
+                                                .build()
+                                        )
+                                        .setMediaId(song.id)
+                                        .setUri("file://${song.filePath}".toUri())
+                                        .setCustomCacheKey(song.id)
+                                        .build()
+                                }
+                                binder?.player?.forcePlayFromBeginning(mediaItems)
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -466,6 +601,95 @@ private fun AlbumCard(
                     maxLines = 1
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun SongDownloadItem(song: DownloadedSong) {
+    val (colorPalette, typography) = LocalAppearance.current
+    val binder = LocalPlayerServiceBinder.current
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = if (colorPalette.isDark) 
+                    colorPalette.background1 
+                else 
+                    colorPalette.background2,
+                shape = RoundedCornerShape(8.dp)
+            )
+            .clickable {
+                // Create a MediaItem with proper file URI for downloaded songs
+                val mediaItem = MediaItem.Builder()
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(song.title)
+                            .setArtist(song.artistsText)
+                            .setArtworkUri(song.thumbnailUrl?.toUri())
+                            .setExtras(
+                                SongBundleAccessor.bundle {
+                                    durationText = song.durationText
+                                    explicit = song.explicit
+                                    albumId = song.albumId
+                                    artistIds = song.artistIds?.split(",")?.map { it.trim() }
+                                }
+                            )
+                            .build()
+                    )
+                    .setMediaId(song.id)
+                    .setUri("file://${song.filePath}".toUri()) // Use direct file path
+                    .setCustomCacheKey(song.id)
+                    .build()
+                
+                binder?.player?.forcePlay(mediaItem)
+            }
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = song.thumbnailUrl,
+            contentDescription = null,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(
+                    color = if (colorPalette.isDark) 
+                        colorPalette.background2 
+                    else 
+                        colorPalette.background1
+                )
+        )
+        
+        Spacer(modifier = Modifier.size(12.dp))
+        
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = typography.s,
+                color = colorPalette.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            
+            song.albumTitle?.let { albumTitle ->
+                Text(
+                    text = albumTitle,
+                    style = typography.xs,
+                    color = colorPalette.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        
+        song.durationText?.let { duration ->
+            Text(
+                text = duration,
+                style = typography.xs,
+                color = colorPalette.textDisabled
+            )
         }
     }
 }

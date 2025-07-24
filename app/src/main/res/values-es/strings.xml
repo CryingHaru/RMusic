@@ -153,15 +153,15 @@
     <string name="view_album">Ver álbum</string>
     <string name="view_playlist">Ver lista de reproducción</string>
     <string name="search_placeholder">Introduce un nombre</string>
-    <string name="format_version_credits">v%1$s por Huizengek y vfsfitvnm</string>
+    <string name="format_version_credits">RMusic v%1$s de CryingHaru - Basado en ViTune por Huizengek y vfsfitvnm</string>
     <string name="social">Social</string>
     <string name="contact">Contacto</string>
     <string name="github">GitHub</string>
     <string name="view_source">Ver el código fuente</string>
     <string name="report_bug">Reportar un problema</string>
-    <string name="report_bug_description">Si necesitas ayuda con un error, puedes presentar un problema en GitHub (haz clic para redirigir)</string>
+    <string name="report_bug_description">Si necesitas ayuda con un error, puedes presentar un problema en el repositorio de RMusic en GitHub (haz clic para redirigir)</string>
     <string name="request_feature">Solicitar una función o sugerir una idea</string>
-    <string name="redirect_github">Serás redirigido a GitHub</string>
+    <string name="redirect_github">Serás redirigido al repositorio de RMusic en GitHub</string>
     <string name="color_source">Color de acento</string>
     <string name="color_source_default">Predeterminado</string>
     <string name="color_source_dynamic">Dinámico</string>
@@ -339,7 +339,7 @@
     <string name="version">Versión</string>
     <string name="check_new_version">Buscar actualizaciones</string>
     <string name="current_version">Actualmente estás ejecutando la versión v%1$s</string>
-    <string name="error_github">Ocurrió un error desconocido al obtener datos de GitHub</string>
+    <string name="error_github">Ocurrió un error desconocido al obtener datos del repositorio de RMusic en GitHub</string>
     <string name="new_version_available">Hay una nueva versión disponible</string>
     <string name="more_information">Más información</string>
     <string name="up_to_date">Estás actualizado: no hay actualizaciones disponibles</string>
@@ -371,9 +371,86 @@
         <item quantity="many">Eliminar %1$s eventos de reproducción</item>
         <item quantity="other">Eliminar %1$s eventos de reproducción</item>
     </plurals>
+    <string name="auto_download_started">Descargando automáticamente "%1$s"</string>
     <plurals name="song_count_plural">
         <item quantity="one">%1$d canción</item>
         <item quantity="many">%1$d canciones</item>
         <item quantity="other">%1$d canciones</item>
     </plurals>
+    
+    <!-- Download-related strings -->
+    <string name="downloads">Descargas</string>
+    <string name="download_statistics">Estadísticas de descarga</string>
+    <string name="songs_downloaded">canciones descargadas</string>
+    <string name="total_size">tamaño total</string>
+    <string name="no_downloads_yet">Aún no hay descargas</string>
+    <string name="download_music_to_see_here">Descarga música para verla aquí</string>
+    <string name="downloading_music">Descargando música</string>
+    <string name="download_notifications">Notificaciones de descarga</string>
+    <string name="downloads_in_progress">Las descargas están en progreso. Revisa las notificaciones para más detalles.</string>
+    <string name="download_description">Gestiona tu música descargada y configuración de descargas</string>
+    <string name="downloaded_music">Música descargada</string>
+    <string name="format_downloads_info">%1$d canciones • %2$s</string>
+    <string name="clear_all">Limpiar todo</string>
+    <string name="storage_location">Ubicación de almacenamiento</string>
+    <string name="download_location_description">Carpeta Music/Downloads</string>
+    <string name="download_quality">Calidad de descarga</string>
+    <string name="download_quality_description">Mejor calidad disponible (~160kbps AAC)</string>
+    <string name="download_behavior">Comportamiento de descarga</string>
+    <string name="wifi_only_downloads">Descargas solo con Wi-Fi</string>
+    <string name="wifi_only_downloads_description">Solo descargar cuando esté conectado a Wi-Fi</string>
+    <string name="organize_by_artist">Organizar por artista</string>
+    <string name="organize_by_artist_description">Crear estructura de carpetas Artista/Álbum</string>
+    <string name="auto_download_at_half">Descarga automática al 50%</string>
+    <string name="auto_download_at_half_description">Descargar automáticamente canciones cuando se reproducen al 50%</string>
+    <string name="storage_limit_reached_message">Descarga automática pausada: El almacenamiento del dispositivo está al 95% de capacidad</string>
+    <string name="auto_download_disabled_storage_full">Descarga automática deshabilitada: El almacenamiento está al 95% de capacidad. Libera espacio para volver a habilitar.</string>
+    <string name="high_quality">Mejor disponible (~160 kbps AAC)</string>
+    <string name="download">Descargar</string>
+    <string name="active_downloads">Descargas activas</string>
+    <string name="queued">En cola</string>
+    <string name="paused">Pausado</string>
+    <string name="auto_open_player">Abrir reproductor</string>
+    <string name="auto_open_player_description">Expandir automáticamente el reproductor al tocar una canción</string>
+    <string name="pause_minimum_volume">Pausar en volumen mínimo</string>
+    <string name="pause_minimum_volume_description">Pausar el reproductor cuando estableces el volumen del dispositivo a cero</string>
+    <string name="asset_statements" translatable="false">
+[{"include": "https://signin.example.com/.well-known/assetlinks.json"}]
+</string>
+    <string name="playback_error">Error de reproducción: %1$s</string>
+    
+    <!-- KDownloader Settings -->
+    <string name="kdownloader_settings">Configuración de KDownloader</string>
+    <string name="download_management">Gestión de descargas</string>
+    <string name="active_downloads_count">%1$d descargas activas</string>
+    <string name="pause_all_downloads">Pausar todas las descargas</string>
+    <string name="resume_all_downloads">Reanudar todas las descargas</string>
+    <string name="pause_resume_all_description">Controlar todas las descargas a la vez</string>
+    <string name="cancel_all_downloads">Cancelar todas las descargas</string>
+    <string name="cancel_all_downloads_description">Detener y eliminar todas las descargas</string>
+    <string name="cleanup_and_maintenance">Limpieza y mantenimiento</string>
+    <string name="cleanup_old_files">Limpiar archivos antiguos</string>
+    <string name="cleanup_old_files_description">Eliminar archivos de descarga antiguos y temporales</string>
+    <string name="kdownloader_info">Información de KDownloader</string>
+    <string name="kdownloader_description">Motor de descarga avanzado con capacidades mejoradas</string>
+    <string name="kdownloader_features">Características:</string>
+    <string name="feature_pause_resume">• Pausar y reanudar descargas</string>
+    <string name="feature_large_files">• Soporte para archivos grandes</string>
+    <string name="feature_parallel_downloads">• Flujos de descarga paralelos</string>
+    <string name="feature_progress_tracking">• Seguimiento de progreso en tiempo real</string>
+    <string name="feature_error_handling">• Manejo avanzado de errores</string>
+    <string name="cleanup_confirmation">¿Estás seguro de que quieres limpiar los archivos antiguos?</string>
+    <string name="cancel_all_confirmation">¿Estás seguro de que quieres cancelar todas las descargas?</string>
+    <string name="cancel_all">Cancelar todo</string>
+    
+    <!-- Download notification strings -->
+    <string name="download_in_progress">Descarga en progreso...</string>
+    <string name="unknown_artist">Artista desconocido</string>
+    <string name="preparing_downloads">Preparando descargas...</string>
+    <string name="downloading_title">Descargando: %1$s</string>
+    <string name="queued_title">En cola: %1$s</string>
+    <string name="paused_title">Pausado: %1$s</string>
+    <string name="downloads_active">%1$d descargas activas</string>
+    <string name="downloads_in_progress_count">%1$d descargas en progreso</string>
+    <string name="download_service">Servicio de descarga</string>
 </resources>

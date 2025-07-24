@@ -143,7 +143,7 @@ interface Database {
     @Query("SELECT * FROM DownloadedSong WHERE artistIds LIKE '%' || :artistId || '%' ORDER BY albumTitle, title")
     fun downloadedSongsByArtistId(artistId: String): Flow<List<DownloadedSong>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     fun insert(downloadedArtist: DownloadedArtist)
 
     @Update
@@ -873,7 +873,7 @@ interface Database {
         DownloadItem::class
     ],
     views = [SortedSongPlaylistMap::class],
-    version = 33,
+    version = 34,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -926,7 +926,8 @@ abstract class DatabaseInitializer protected constructor() : RoomDatabase() {
                 From10To11Migration(),
                 From14To15Migration(),
                 From22To23Migration(),
-                From23To24Migration()
+                From23To24Migration(),
+                From33To34Migration()
             )
             .build()
 
@@ -1171,6 +1172,12 @@ abstract class DatabaseInitializer protected constructor() : RoomDatabase() {
     class From23To24Migration : Migration(23, 24) {
         override fun migrate(db: SupportSQLiteDatabase) =
             db.execSQL("ALTER TABLE Song ADD COLUMN loudnessBoost REAL")
+    }
+
+    class From33To34Migration : Migration(33, 34) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `Format` ADD COLUMN `url` TEXT")
+        }
     }
 }
 

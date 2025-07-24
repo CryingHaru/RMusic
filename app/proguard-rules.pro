@@ -46,3 +46,5 @@
 -keep class org.mozilla.classfile.ClassFileWriter
 -dontwarn org.mozilla.javascript.JavaToJSONConverters
 -dontwarn org.mozilla.javascript.tools.**
+
+-keep class com.rmusic.android.models.** { *; }

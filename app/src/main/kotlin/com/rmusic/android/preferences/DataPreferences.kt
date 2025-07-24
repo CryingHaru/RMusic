@@ -63,8 +63,6 @@ object DataPreferences : GlobalPreferencesHolder() {
         val displayName: @Composable () -> String,
         val bitrate: Int
     ) {
-        Low(displayName = { stringResource(R.string.low_quality) }, bitrate = 128),
-        Medium(displayName = { stringResource(R.string.medium_quality) }, bitrate = 192),
-        High(displayName = { stringResource(R.string.high_quality) }, bitrate = 320)
+        High(displayName = { stringResource(R.string.high_quality) }, bitrate = 160)  // YouTube's actual max ~160kbps AAC
     }
 }

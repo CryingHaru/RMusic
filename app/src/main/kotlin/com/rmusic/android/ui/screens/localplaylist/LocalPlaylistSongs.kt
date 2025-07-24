@@ -56,6 +56,7 @@ import com.rmusic.android.ui.components.themed.SecondaryTextButton
 import com.rmusic.android.ui.components.themed.TextFieldDialog
 import com.rmusic.android.ui.items.SongItem
 import com.rmusic.android.utils.PlaylistDownloadIcon
+import com.rmusic.android.utils.PlaylistDownloadIconSpecific
 import com.rmusic.android.utils.asMediaItem
 import com.rmusic.android.utils.completed
 import com.rmusic.android.utils.enqueue
@@ -182,7 +183,9 @@ fun LocalPlaylistSongs(
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             }
 
-                            PlaylistDownloadIcon(
+                            PlaylistDownloadIconSpecific(
+                                playlistId = playlist.id.toString(),
+                                playlistName = playlist.name,
                                 songs = songs.map { it.asMediaItem }.toImmutableList()
                             )
 

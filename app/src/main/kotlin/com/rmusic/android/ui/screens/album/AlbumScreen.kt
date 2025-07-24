@@ -203,6 +203,7 @@ fun AlbumScreen(browseId: String) {
                     when (currentTabIndex) {
                         0 -> AlbumSongs(
                             songs = songs,
+                            album = album,
                             headerContent = headerContent,
                             thumbnailContent = thumbnailContent,
                             afterHeaderContent = {

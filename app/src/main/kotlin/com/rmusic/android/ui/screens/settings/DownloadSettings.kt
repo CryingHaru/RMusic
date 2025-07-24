@@ -25,6 +25,7 @@ import com.rmusic.android.Database
 import com.rmusic.android.LocalPlayerServiceBinder
 import com.rmusic.android.R
 import com.rmusic.android.preferences.DataPreferences
+import com.rmusic.android.preferences.PlayerPreferences
 import com.rmusic.android.ui.components.themed.SecondaryTextButton
 import com.rmusic.android.ui.screens.Route
 import com.rmusic.core.data.enums.CoilDiskCacheSize
@@ -159,6 +160,13 @@ fun DownloadSettings() = with(DataPreferences) {
                 text = stringResource(R.string.organize_by_artist_description),
                 isChecked = DataPreferences.organizeDownloadsByArtist,
                 onCheckedChange = { DataPreferences.organizeDownloadsByArtist = it }
+            )
+            
+            SwitchSettingsEntry(
+                title = stringResource(R.string.auto_download_at_half),
+                text = stringResource(R.string.auto_download_at_half_description),
+                isChecked = PlayerPreferences.autoDownloadAtHalf,
+                onCheckedChange = { PlayerPreferences.autoDownloadAtHalf = it }
             )
         }
     }

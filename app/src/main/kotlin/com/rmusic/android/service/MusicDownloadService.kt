@@ -1,4 +1,5 @@
 package com.rmusic.android.service
+import androidx.media3.common.MediaItem
 
 import android.app.Notification
 import android.app.NotificationManager
@@ -20,6 +21,11 @@ import com.rmusic.android.utils.intent
 import com.rmusic.android.MainActivity
 import com.rmusic.android.utils.InvincibleService
 import com.rmusic.android.utils.thumbnail
+import com.rmusic.providers.innertube.Innertube
+import com.rmusic.providers.innertube.models.bodies.PlayerBody
+import com.rmusic.providers.innertube.requests.artistPage
+import com.rmusic.providers.innertube.requests.player
+import com.rmusic.providers.innertube.models.bodies.BrowseBody
 import com.rmusic.android.service.ServiceNotifications
 import com.rmusic.android.workers.DownloadWorker
 import com.rmusic.download.DownloadManager
@@ -30,7 +36,7 @@ import com.rmusic.download.models.DownloadItem
 import com.rmusic.download.DownloadProvider
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
-import io.ktor.client.statement.readBytes
+import io.ktor.client.statement.readRawBytes
 import io.ktor.http.isSuccess
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +48,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -132,10 +139,11 @@ class MusicDownloadService : InvincibleService() {
         
         // Monitor download state changes
         scope.launch {
-            downloadManager.getActiveDownloads()
+            @OptIn(kotlinx.coroutines.FlowPreview::class)
+            val activeDownloadsFlow = downloadManager.getActiveDownloads()
                 .debounce(100)
                 .distinctUntilChanged()
-                .collect { activeDownloads ->
+            activeDownloadsFlow.collect { activeDownloads ->
                     android.util.Log.d(TAG, "Active downloads: ${activeDownloads.size}")
                     currentActiveDownloads = activeDownloads  // Update current state
                     mutableDownloadState.value = activeDownloads.isNotEmpty()
@@ -190,11 +198,33 @@ class MusicDownloadService : InvincibleService() {
                     // Get artist information if available
                     val artistsInfo = originalSong?.let { song ->
                         try {
-                            Database.songArtistInfo(song.id)
+                            val dbArtistsInfo = Database.songArtistInfo(song.id)
+                            if (dbArtistsInfo.isNotEmpty()) {
+                                android.util.Log.d(TAG, "Found ${dbArtistsInfo.size} artists in database for song ${song.id}")
+                                dbArtistsInfo
+                            } else {
+                                android.util.Log.d(TAG, "No artists found in database for song ${song.id}")
+                                emptyList()
+                            }
                         } catch (e: Exception) {
+                            android.util.Log.w(TAG, "Failed to get artist info from database for song ${song.id}", e)
                             emptyList()
                         }
                     } ?: emptyList()
+                    
+                    // If we don't have artist info from database, try to create one from downloadItem.artist
+                    val fallbackArtistInfo = if (artistsInfo.isEmpty() && !downloadItem.artist.isNullOrBlank()) {
+                        android.util.Log.d(TAG, "Creating fallback artist info from downloadItem.artist: ${downloadItem.artist}")
+                        val artistName = downloadItem.artist!!
+                        listOf(com.rmusic.android.models.Info(
+                            id = "fallback_${artistName.hashCode()}",
+                            name = artistName
+                        ))
+                    } else {
+                        emptyList()
+                    }
+                    
+                    val finalArtistsInfo = if (artistsInfo.isNotEmpty()) artistsInfo else fallbackArtistInfo
                     
                     val downloadedSong = DownloadedSong(
                         id = "download:${downloadItem.id}",
@@ -202,7 +232,7 @@ class MusicDownloadService : InvincibleService() {
                         artistsText = downloadItem.artist ?: originalSong?.artistsText,
                         albumTitle = downloadItem.album ?: albumInfo?.name,
                         albumId = albumInfo?.id,
-                        artistIds = artistsInfo.joinToString(",") { it.id }, // Store as comma-separated string
+                        artistIds = finalArtistsInfo.joinToString(",") { it.id }, // Store as comma-separated string
                         durationText = downloadItem.duration?.let { "${it / 1000 / 60}:${String.format("%02d", (it / 1000) % 60)}" } 
                             ?: originalSong?.durationText,
                         thumbnailUrl = downloadItem.thumbnailUrl ?: originalSong?.thumbnailUrl,
@@ -250,20 +280,42 @@ class MusicDownloadService : InvincibleService() {
                             downloadAlbumCoverWithKDownloader(thumbnailUrl, file.parentFile, "cover.jpg")
                         }
                         
-                        // Download artist thumbnail - use KDownloader provider instead of HttpClient
-                        val artistThumbnailUrl = downloadItem.thumbnailUrl 
-                            ?: originalSong?.thumbnailUrl
-                            ?: artistsInfo.firstOrNull()?.let { artistInfo ->
-                                try {
-                                    Database.artist(artistInfo.id).first()?.thumbnailUrl
-                                } catch (e: Exception) {
-                                    null
+                        // Download artist thumbnail - get actual artist profile image
+                        finalArtistsInfo.firstOrNull()?.let { artistInfo: com.rmusic.android.models.Info ->
+                            try {
+                                val artistThumbnailUrl: String? = if (artistInfo.id.startsWith("fallback_")) {
+                                    null // No thumbnail for fallback artists
+                                } else {
+                                    // Try to get artist thumbnail from database first
+                                    val dbArtist = Database.artist(artistInfo.id).first()
+                                    if (dbArtist?.thumbnailUrl != null) {
+                                        dbArtist.thumbnailUrl
+                                    } else {
+                                        // If not in database, try to fetch from Innertube
+                                        android.util.Log.d(TAG, "Fetching artist thumbnail from Innertube for: ${artistInfo.name}")
+                                        try {
+                                            val artistPageResult = Innertube.artistPage(
+                                                BrowseBody(browseId = artistInfo.id)
+                                            )?.getOrNull()
+                                            val thumbnailUrl = artistPageResult?.thumbnail?.url
+                                            if (thumbnailUrl != null) {
+                                                android.util.Log.d(TAG, "Found artist thumbnail URL: $thumbnailUrl")
+                                            }
+                                            thumbnailUrl
+                                        } catch (e: Exception) {
+                                            android.util.Log.w(TAG, "Failed to fetch artist thumbnail from Innertube", e)
+                                            null
+                                        }
+                                    }
                                 }
+                                
+                                artistThumbnailUrl?.let { thumbnailUrl: String ->
+                                    android.util.Log.d(TAG, "Downloading artist thumbnail via KDownloader: $thumbnailUrl")
+                                    downloadArtistThumbnailWithKDownloader(thumbnailUrl, file.parentFile?.parentFile, "artist.jpg")
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.w(TAG, "Error processing artist thumbnail", e)
                             }
-                            
-                        artistThumbnailUrl?.let { thumbnailUrl ->
-                            android.util.Log.d(TAG, "Downloading artist thumbnail via KDownloader: $thumbnailUrl")
-                            downloadArtistThumbnailWithKDownloader(thumbnailUrl, file.parentFile?.parentFile, "artist.jpg")
                         }
                     }
                     
@@ -292,46 +344,59 @@ class MusicDownloadService : InvincibleService() {
                         }
                     }
                     
-                    // Download artist thumbnail if available - use downloadItem.thumbnailUrl from Innertube/KDownloader
-                    val artistThumbnailUrl = downloadItem.thumbnailUrl 
-                        ?: originalSong?.thumbnailUrl
-                        ?: artistsInfo.firstOrNull()?.let { artistInfo ->
-                            try {
-                                Database.artist(artistInfo.id).first()?.thumbnailUrl
+                    finalArtistsInfo.forEach { artistInfo ->
+                        try {
+                            // Check if artist already exists in downloads
+                            val existingArtist = try {
+                                Database.downloadedArtist(artistInfo.id).first()
                             } catch (e: Exception) {
                                 null
                             }
-                        }
-                        
-                    artistThumbnailUrl?.let { thumbnailUrl ->
-                        android.util.Log.d(TAG, "Downloading artist thumbnail via KDownloader: $thumbnailUrl")
-                        downloadArtistThumbnailWithKDownloader(thumbnailUrl, file.parentFile?.parentFile, "artist.jpg")
-                    }
-                    
-                    artistsInfo.forEach { artistInfo ->
-                        try {
-                            val artistData = Database.artist(artistInfo.id).first()
-                            artistData?.let { artist ->
-                                // Use downloadItem.thumbnailUrl as primary source for artist thumbnail
-                                val finalThumbnailUrl = downloadItem.thumbnailUrl ?: artist.thumbnailUrl
+                            
+                            if (existingArtist != null) {
+                                // Update song count for existing artist
+                                val updatedArtist = existingArtist.copy(
+                                    songCount = existingArtist.songCount + 1,
+                                    downloadedAt = System.currentTimeMillis() // Update download timestamp
+                                )
+                                android.util.Log.d(TAG, "Updating existing DownloadedArtist: id=${artistInfo.id}, songCount=${updatedArtist.songCount}")
+                                Database.update(updatedArtist)
+                            } else {
+                                // Create new DownloadedArtist entry
+                                val finalThumbnailUrl = if (artistInfo.id.startsWith("fallback_")) {
+                                    null // Don't use album thumbnail for fallback artists
+                                } else {
+                                    // Try to get actual artist thumbnail from database
+                                    try {
+                                        Database.artist(artistInfo.id).first()?.thumbnailUrl
+                                    } catch (e: Exception) {
+                                        null
+                                    }
+                                }
                                 
                                 val downloadedArtist = DownloadedArtist(
-                                    id = artist.id,
-                                    name = artist.name ?: artistInfo.name ?: "Unknown Artist",
+                                    id = artistInfo.id,
+                                    name = artistInfo.name ?: "Unknown Artist",
                                     thumbnailUrl = File(file.parentFile?.parentFile, "artist.jpg").let { localThumbnail ->
                                         if (localThumbnail.exists()) "file://${localThumbnail.absolutePath}"
                                         else finalThumbnailUrl
                                     },
-                                    songCount = 1 // We'll update this with actual count later
+                                    downloadedAt = System.currentTimeMillis(),
+                                    bookmarkedAt = null,
+                                    songCount = 1
                                 )
+                                
+                                android.util.Log.d(TAG, "Inserting new DownloadedArtist: id=${artistInfo.id}, name=${artistInfo.name}")
                                 Database.insert(downloadedArtist)
                             }
+                            
                         } catch (e: Exception) {
-                            android.util.Log.e(TAG, "Failed to process artist info", e)
+                            android.util.Log.e(TAG, "Failed to process artist info for ${artistInfo.id}: ${artistInfo.name}", e)
                         }
                     }
                 }
             } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error in saveCompletedDownload for ${downloadItem.title}", e)
                 e.printStackTrace()
             }
         }
@@ -388,7 +453,7 @@ class MusicDownloadService : InvincibleService() {
                 // Fallback to HttpClient if KDownloader fails - also use high res URL
                 val response = httpClient.get(highResUrl)
                 if (response.status.isSuccess()) {
-                    val bytes = response.readBytes()
+                    val bytes = response.readRawBytes()
                     coverFile.writeBytes(bytes)
                     android.util.Log.d(TAG, "Album cover saved via HttpClient fallback: ${coverFile.absolutePath} (${bytes.size} bytes)")
                 } else {
@@ -451,7 +516,7 @@ class MusicDownloadService : InvincibleService() {
                 // Fallback to HttpClient if KDownloader fails - also use high res URL
                 val response = httpClient.get(highResUrl)
                 if (response.status.isSuccess()) {
-                    val bytes = response.readBytes()
+                    val bytes = response.readRawBytes()
                     thumbnailFile.writeBytes(bytes)
                     android.util.Log.d(TAG, "Artist thumbnail saved via HttpClient fallback: ${thumbnailFile.absolutePath} (${bytes.size} bytes)")
                 } else {
@@ -501,30 +566,30 @@ class MusicDownloadService : InvincibleService() {
             is DownloadState.Downloading -> {
                 val progress = (downloadState.progress * 100).toInt()
                 notificationBuilder
-                    .setContentTitle("Downloading: ${currentDownload.title}")
-                    .setContentText("${currentDownload.artist ?: "Unknown Artist"} • $progress%")
+                    .setContentTitle(getString(R.string.downloading_title, currentDownload.title))
+                    .setContentText("${currentDownload.artist ?: getString(R.string.unknown_artist)} • $progress%")
                     .setProgress(100, progress, false)
                 
                 if (activeDownloads.size > 1) {
-                    notificationBuilder.setSubText("${activeDownloads.size} downloads active")
+                    notificationBuilder.setSubText(getString(R.string.downloads_active, activeDownloads.size))
                 }
             }
             is DownloadState.Queued -> {
                 notificationBuilder
-                    .setContentTitle("Queued: ${currentDownload.title}")
-                    .setContentText(currentDownload.artist ?: "Unknown Artist")
+                    .setContentTitle(getString(R.string.queued_title, currentDownload.title))
+                    .setContentText(currentDownload.artist ?: getString(R.string.unknown_artist))
                     .setProgress(100, 0, true)
             }
             is DownloadState.Paused -> {
                 notificationBuilder
-                    .setContentTitle("Paused: ${currentDownload.title}")
-                    .setContentText(currentDownload.artist ?: "Unknown Artist")
+                    .setContentTitle(getString(R.string.paused_title, currentDownload.title))
+                    .setContentText(currentDownload.artist ?: getString(R.string.unknown_artist))
                     .setProgress(100, 0, false)
             }
             else -> {
                 notificationBuilder
-                    .setContentTitle("Downloading Music")
-                    .setContentText("${activeDownloads.size} downloads in progress")
+                    .setContentTitle(getString(R.string.downloading_music))
+                    .setContentText(getString(R.string.downloads_in_progress_count, activeDownloads.size))
                     .setProgress(100, 0, true)
             }
         }
@@ -535,8 +600,8 @@ class MusicDownloadService : InvincibleService() {
     private fun createDefaultNotification(): Notification {
         return NotificationCompat.Builder(this, ServiceNotifications.download.id)
             .setSmallIcon(R.drawable.download)
-            .setContentTitle("Download Service")
-            .setContentText("Preparing downloads...")
+            .setContentTitle(getString(R.string.download_service))
+            .setContentText(getString(R.string.preparing_downloads))
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
@@ -627,6 +692,28 @@ class MusicDownloadService : InvincibleService() {
                     }
                 }
             }
+            "download_playlist" -> {
+                android.util.Log.d(TAG, "Download playlist action received")
+                
+                // Check storage permissions before starting download
+                if (!com.rmusic.android.utils.PermissionManager.hasStoragePermissions(this)) {
+                    android.util.Log.w(TAG, "Storage permissions not granted, cannot start playlist download")
+                    return
+                }
+                
+                handlePlaylistDownload(intent)
+            }
+            "download_album" -> {
+                android.util.Log.d(TAG, "Download album action received")
+                
+                // Check storage permissions before starting download
+                if (!com.rmusic.android.utils.PermissionManager.hasStoragePermissions(this)) {
+                    android.util.Log.w(TAG, "Storage permissions not granted, cannot start album download")
+                    return
+                }
+                
+                handleAlbumDownload(intent)
+            }
             "pause" -> {
                 val trackId = intent.getStringExtra("trackId") ?: return
                 scope.launch {
@@ -716,6 +803,170 @@ class MusicDownloadService : InvincibleService() {
         }
     }
     
+    private fun handlePlaylistDownload(intent: Intent) {
+        val playlistId = intent.getStringExtra("playlistId") ?: return
+        val playlistName = intent.getStringExtra("playlistName") ?: return
+        val songCount = intent.getIntExtra("songCount", 0)
+        
+        val trackIds = intent.getStringArrayExtra("trackIds") ?: return
+        val titles = intent.getStringArrayExtra("titles") ?: return
+        val artists = intent.getStringArrayExtra("artists")
+        val albums = intent.getStringArrayExtra("albums")
+        val thumbnailUrls = intent.getStringArrayExtra("thumbnailUrls")
+        val durations = intent.getLongArrayExtra("durations")
+        
+        android.util.Log.d(TAG, "Starting playlist download: $playlistName with $songCount songs")
+        
+        scope.launch {
+            try {
+                // Process each song in the playlist
+                for (i in trackIds.indices) {
+                    val trackId = trackIds[i]
+                    val title = titles[i]
+                    val artist = artists?.get(i)
+                    val album = albums?.get(i)
+                    val thumbnailUrl = thumbnailUrls?.get(i)
+                    val duration = durations?.get(i)?.takeIf { it > 0 }
+                    
+                    // Generate download URL - this would need to be obtained from the provider
+                    // For now, we'll skip songs without URLs, but in practice you'd fetch them
+                    try {
+                        // Try to get the song from database to find streaming URL
+                        val song = Database.song(trackId).firstOrNull()
+                        if (song != null) {
+                            // Generate streaming URL using providers
+                            val url = generateStreamingUrl(song)
+                            if (url != null) {
+                                downloadManager.downloadTrack(
+                                    providerId = "kdownloader",
+                                    trackId = trackId,
+                                    title = title,
+                                    artist = artist,
+                                    album = album ?: playlistName, // Use playlist name as album if not specified
+                                    thumbnailUrl = thumbnailUrl,
+                                    duration = duration,
+                                    url = url
+                                )
+                                android.util.Log.d(TAG, "Started download for playlist song: $title")
+                                
+                                // Add small delay between downloads to avoid overwhelming the system
+                                kotlinx.coroutines.delay(500)
+                            } else {
+                                android.util.Log.w(TAG, "Could not generate URL for song: $title")
+                            }
+                        } else {
+                            android.util.Log.w(TAG, "Song not found in database: $trackId")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e(TAG, "Error downloading playlist song $title", e)
+                    }
+                }
+                
+                android.util.Log.d(TAG, "Playlist download initiated for all available songs")
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error in handlePlaylistDownload", e)
+            }
+        }
+    }
+    
+    private fun handleAlbumDownload(intent: Intent) {
+        val albumId = intent.getStringExtra("albumId") ?: return
+        val albumName = intent.getStringExtra("albumName") ?: return
+        val songCount = intent.getIntExtra("songCount", 0)
+
+        val trackIds = intent.getStringArrayExtra("trackIds") ?: return
+        val titles = intent.getStringArrayExtra("titles") ?: return
+        val artists = intent.getStringArrayExtra("artists")
+        val albums = intent.getStringArrayExtra("albums")
+        val thumbnailUrls = intent.getStringArrayExtra("thumbnailUrls")
+        val durations = intent.getLongArrayExtra("durations")
+
+        android.util.Log.d(TAG, "Starting album download: $albumName with $songCount songs")
+
+        scope.launch {
+            try {
+                // Process each song in the album
+                for (i in trackIds.indices) {
+                    val trackId = trackIds[i]
+                    val title = titles[i]
+                    val artist = artists?.get(i)
+                    val album = albums?.get(i) ?: albumName
+                    val thumbnailUrl = thumbnailUrls?.get(i)
+                    val duration = durations?.get(i)?.takeIf { it > 0 }
+
+                    try {
+                        // Try to get the song from database to find streaming URL
+                        val song = Database.song(trackId).firstOrNull()
+                        if (song != null) {
+                            // Generate streaming URL using providers
+                            val url = generateStreamingUrl(song)
+                            if (url != null) {
+                                downloadManager.downloadTrack(
+                                    providerId = "kdownloader",
+                                    trackId = trackId,
+                                    title = title,
+                                    artist = artist,
+                                    album = album,
+                                    thumbnailUrl = thumbnailUrl,
+                                    duration = duration,
+                                    url = url
+                                )
+                                android.util.Log.d(TAG, "Started download for album song: $title")
+
+                                // Add small delay between downloads to avoid overwhelming the system
+                                kotlinx.coroutines.delay(500)
+                            } else {
+                                android.util.Log.w(TAG, "Could not generate URL for song: $title")
+                            }
+                        } else {
+                            android.util.Log.w(TAG, "Song not found in database: $trackId")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e(TAG, "Error downloading album song $title", e)
+                    }
+                }
+
+                android.util.Log.d(TAG, "Album download initiated for all available songs")
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error in handleAlbumDownload", e)
+            }
+        }
+    }
+    
+    private suspend fun generateStreamingUrl(song: com.rmusic.android.models.Song): String? {
+        return try {
+            // Try to get the streaming URL from the format in database
+            val format = Database.format(song.id).firstOrNull()
+            if (format != null && !format.url.isNullOrBlank()) {
+                return format.url
+            }
+
+            // If not in database, fetch from Innertube
+            Innertube.player(PlayerBody(videoId = song.id))?.getOrNull()?.let { playerResponse ->
+                val bestFormat = playerResponse.streamingData?.adaptiveFormats
+                    ?.filter { it.mimeType.contains("audio/mp4") && it.bitrate != null && it.url != null }
+                    ?.maxByOrNull { it.bitrate!! }
+
+                bestFormat?.url?.let { url ->
+                    // Save the fetched format to the database for future use
+                    Database.insert(
+                        com.rmusic.android.models.Format(
+                            songId = song.id,
+                            url = url,
+                            bitrate = bestFormat.bitrate,
+                            contentLength = bestFormat.contentLength
+                        )
+                    )
+                    return url
+                }
+            }
+            null
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Could not get streaming URL for song ${song.id}", e)
+            null
+        }
+    }
+    
     companion object {
         private const val TAG = "MusicDownloadService"
         
@@ -728,7 +979,7 @@ class MusicDownloadService : InvincibleService() {
             context.startService(intent)
         }
         
-        // Other existing companion functions...
+        // Single track download
         fun download(
             context: Context,
             trackId: String,
@@ -758,6 +1009,68 @@ class MusicDownloadService : InvincibleService() {
                 android.util.Log.d(TAG, "Service started successfully")
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Failed to start service", e)
+            }
+        }
+
+        // Download entire playlist
+        fun downloadPlaylist(
+            context: Context,
+            playlistId: String,
+            playlistName: String,
+            songs: List<MediaItem>
+        ) {
+            android.util.Log.d(TAG, "Starting playlist download: $playlistName with ${songs.size} songs")
+            
+            val intent = Intent(context, MusicDownloadService::class.java).apply {
+                putExtra("action", "download_playlist")
+                putExtra("playlistId", playlistId)
+                putExtra("playlistName", playlistName)
+                putExtra("songCount", songs.size)
+                // Store songs as arrays for the intent
+                putExtra("trackIds", songs.map { it.mediaId }.toTypedArray())
+                putExtra("titles", songs.map { it.mediaMetadata.title?.toString() ?: "Unknown" }.toTypedArray())
+                putExtra("artists", songs.map { it.mediaMetadata.artist?.toString() }.toTypedArray())
+                putExtra("albums", songs.map { it.mediaMetadata.albumTitle?.toString() }.toTypedArray())
+                putExtra("thumbnailUrls", songs.map { it.mediaMetadata.artworkUri?.toString() }.toTypedArray())
+                putExtra("durations", songs.map { it.mediaMetadata.durationMs ?: 0L }.toLongArray())
+            }
+            
+            try {
+                context.startService(intent)
+                android.util.Log.d(TAG, "Playlist download service started successfully")
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Failed to start playlist download service", e)
+            }
+        }
+
+        // Download entire album
+        fun downloadAlbum(
+            context: Context,
+            albumId: String,
+            albumName: String,
+            songs: List<MediaItem>
+        ) {
+            android.util.Log.d(TAG, "Starting album download: $albumName with ${songs.size} songs")
+            
+            val intent = Intent(context, MusicDownloadService::class.java).apply {
+                putExtra("action", "download_album")
+                putExtra("albumId", albumId)
+                putExtra("albumName", albumName)
+                putExtra("songCount", songs.size)
+                // Store songs as arrays for the intent
+                putExtra("trackIds", songs.map { it.mediaId }.toTypedArray())
+                putExtra("titles", songs.map { it.mediaMetadata.title?.toString() ?: "Unknown" }.toTypedArray())
+                putExtra("artists", songs.map { it.mediaMetadata.artist?.toString() }.toTypedArray())
+                putExtra("albums", songs.map { it.mediaMetadata.albumTitle?.toString() }.toTypedArray())
+                putExtra("thumbnailUrls", songs.map { it.mediaMetadata.artworkUri?.toString() }.toTypedArray())
+                putExtra("durations", songs.map { it.mediaMetadata.durationMs ?: 0L }.toLongArray())
+            }
+            
+            try {
+                context.startService(intent)
+                android.util.Log.d(TAG, "Album download service started successfully")
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Failed to start album download service", e)
             }
         }
 

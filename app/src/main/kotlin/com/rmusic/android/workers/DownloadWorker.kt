@@ -10,6 +10,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.rmusic.android.Database
+import com.rmusic.android.R
 import com.rmusic.android.models.DownloadedSong
 import com.rmusic.download.DownloadManager
 import com.rmusic.download.DownloadState
@@ -149,8 +150,8 @@ class DownloadWorker(
     
     override suspend fun getForegroundInfo(): androidx.work.ForegroundInfo {
         val notification = android.app.Notification.Builder(applicationContext, "download_channel")
-            .setContentTitle("Downloading music")
-            .setContentText("Download in progress...")
+            .setContentTitle(applicationContext.getString(R.string.downloading_music))
+            .setContentText(applicationContext.getString(R.string.download_in_progress))
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)
             .build()

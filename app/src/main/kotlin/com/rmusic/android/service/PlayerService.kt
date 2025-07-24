@@ -19,6 +19,7 @@ import android.media.audiofx.PresetReverb
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Bundle
+import android.os.StatFs
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.support.v4.media.session.MediaSessionCompat
@@ -64,6 +65,7 @@ import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.extractor.DefaultExtractorsFactory
+import com.rmusic.android.BuildConfig
 import com.rmusic.android.Database
 import com.rmusic.android.MainActivity
 import com.rmusic.android.R
@@ -72,11 +74,14 @@ import com.rmusic.android.models.Format
 import com.rmusic.android.models.QueuedMediaItem
 import com.rmusic.android.models.Song
 import com.rmusic.android.models.SongWithContentLength
+import com.rmusic.providers.innertube.Innertube
+import com.rmusic.providers.innertube.requests.player
 import com.rmusic.android.preferences.AppearancePreferences
 import com.rmusic.android.preferences.DataPreferences
 import com.rmusic.android.preferences.PlayerPreferences
 import com.rmusic.android.query
 import com.rmusic.android.service.BitmapProvider
+import com.rmusic.android.service.MusicDownloadService
 import com.rmusic.android.service.PlayableFormatNotFoundException
 import com.rmusic.android.service.ServiceNotifications
 import com.rmusic.android.service.VideoIdMismatchException
@@ -125,12 +130,10 @@ import com.rmusic.core.ui.utils.isAtLeastAndroid8
 import com.rmusic.core.ui.utils.isAtLeastAndroid9
 import com.rmusic.core.ui.utils.songBundle
 import com.rmusic.core.ui.utils.streamVolumeFlow
-import com.rmusic.providers.innertube.Innertube
 import com.rmusic.providers.innertube.InvalidHttpCodeException
 import com.rmusic.providers.innertube.models.NavigationEndpoint
 import com.rmusic.providers.innertube.models.bodies.PlayerBody
 import com.rmusic.providers.innertube.models.bodies.SearchBody
-import com.rmusic.providers.innertube.requests.player
 import com.rmusic.providers.innertube.requests.searchPage
 import com.rmusic.providers.innertube.utils.from
 import com.rmusic.providers.sponsorblock.SponsorBlock
@@ -332,6 +335,9 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             initialValue = false
         )
 
+    // Track songs that have reached 50% playback for auto-download
+    private val autoDownloadedSongs = mutableSetOf<String>()
+
     private val glyphInterface by lazy { GlyphInterface(applicationContext) }
 
     private var poiTimestamp: Long? by mutableStateOf(null)
@@ -446,6 +452,29 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             subscribe(PlayerPreferences.volumeNormalizationBaseGainProperty) { maybeNormalizeVolume() }
             subscribe(PlayerPreferences.volumeNormalizationProperty) { maybeNormalizeVolume() }
             subscribe(PlayerPreferences.sponsorBlockEnabledProperty) { maybeSponsorBlock() }
+            subscribe(PlayerPreferences.autoDownloadAtHalfProperty) { 
+                // Reset tracked songs when preference changes
+                if (!it) autoDownloadedSongs.clear()
+            }
+
+            // Auto-download monitoring - check progress every second when enabled
+            launch {
+                while (isActive) {
+                    // Only check auto-download if the preference is enabled
+                    if (PlayerPreferences.autoDownloadAtHalf) {
+                        try {
+                            maybeAutoDownload()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error in auto-download check", e)
+                        }
+                        // Check every second when enabled
+                        delay(1000)
+                    } else {
+                        // Check every 30 seconds when disabled to save resources
+                        delay(30000)
+                    }
+                }
+            }
 
             launch {
                 val audioManager = getSystemService<AudioManager>()
@@ -558,6 +587,19 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
 
         mediaItemState.update { mediaItem }
+
+        // Reset auto-download tracking for previous song when transitioning
+        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || 
+            reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
+            // Keep only recent songs to avoid memory leaks (last 10 songs)
+            val currentId = mediaItem?.mediaId
+            if (autoDownloadedSongs.size > 10) {
+                // Clear older entries, keeping some recent ones
+                val recentSongs = autoDownloadedSongs.toList().takeLast(5).toMutableSet()
+                autoDownloadedSongs.clear()
+                autoDownloadedSongs.addAll(recentSongs)
+            }
+        }
 
         // Actualizar caché temporal inteligente
         updateTemporalCache()
@@ -933,6 +975,192 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         )
 
         mediaSession.setMetadata(metadataBuilder.build())
+    }
+
+    private fun maybeAutoDownload() {
+        // This function must run on the main thread to access player
+        handler.post {
+            try {
+                if (!PlayerPreferences.autoDownloadAtHalf) {
+                    showDebugNotification("Auto-download disabled")
+                    return@post
+                }
+                
+                val currentMediaItem = player.currentMediaItem ?: run {
+                    showDebugNotification("No current media item")
+                    return@post
+                }
+                val mediaId = currentMediaItem.mediaId
+                
+                // Skip if mediaId is null or empty
+                if (mediaId.isNullOrBlank()) {
+                    showDebugNotification("Media ID is blank")
+                    return@post
+                }
+                
+                // Skip if already processed this song
+                if (mediaId in autoDownloadedSongs) {
+                    showDebugNotification("Already processed: $mediaId")
+                    return@post
+                }
+                
+                // Skip if it's a local file (already downloaded)
+                if (mediaId.startsWith(LOCAL_KEY_PREFIX)) {
+                    showDebugNotification("Local file: $mediaId")
+                    return@post
+                }
+                
+                // Skip if it's already a download file
+                if (mediaId.startsWith("download:")) {
+                    showDebugNotification("Download file: $mediaId")
+                    return@post
+                }
+                
+                val duration = player.duration
+                val position = player.currentPosition
+                val percentage = if (duration > 0 && duration != C.TIME_UNSET) (position * 100 / duration) else 0
+                
+                // Show progress notification
+                val title = currentMediaItem.mediaMetadata.title?.toString() ?: "Unknown"
+                showDebugNotification("$title: ${percentage}% (${position}ms/${duration}ms)")
+                
+                // Check if duration is valid and we've reached 50%
+                if (duration > 0 && duration != C.TIME_UNSET && position >= duration / 2) {
+                    // Verificar espacio de almacenamiento disponible
+                    if (!hasAvailableStorage()) {
+                        showDebugNotification("Storage full (95%+), disabling auto-download: $title")
+                        // Desactivar el switch de auto-descarga cuando se alcance el límite
+                        PlayerPreferences.autoDownloadAtHalf = false
+                        // Mostrar toast al usuario explicando la acción
+                        handler.post {
+                            toast(getString(R.string.auto_download_disabled_storage_full))
+                        }
+                        // Mark as processed to avoid checking again during this session
+                        autoDownloadedSongs.add(mediaId)
+                        return@post
+                    }
+                    
+                    // Mark as processed to avoid duplicate downloads
+                    autoDownloadedSongs.add(mediaId)
+                    
+                    showDebugNotification("Starting download: $title")
+                    
+                    // Start auto-download in background
+                    coroutineScope.launch(Dispatchers.IO) {
+                        try {
+                            // Check if already downloaded
+                            val existingDownload = runCatching {
+                                Database.downloadedSongs().first().find { it.id == "download:$mediaId" }
+                            }.getOrNull()
+                            
+                            if (existingDownload != null) {
+                                showDebugNotification("Already downloaded: $title")
+                                return@launch
+                            }
+                            
+                            // Get streaming URL for download
+                            showDebugNotification("Getting URL for: $title")
+                            val playerResponse = runCatching {
+                                Innertube.player(PlayerBody(videoId = mediaId))
+                            }.getOrNull()
+                            
+                            val streamingUrl = playerResponse?.mapCatching { body ->
+                                body?.streamingData?.adaptiveFormats?.findLast { format ->
+                                    format.itag == 251 || format.itag == 140
+                                }?.url
+                            }?.getOrNull()
+                            
+                            if (streamingUrl != null) {
+                                val metadata = currentMediaItem.mediaMetadata
+                                val artist = metadata.artist?.toString()
+                                val album = metadata.albumTitle?.toString()
+                                val thumbnailUrl = metadata.artworkUri?.toString()
+                                
+                                showDebugNotification("Downloading: $title")
+                                
+                                // Start download using MusicDownloadService
+                                MusicDownloadService.download(
+                                    context = this@PlayerService,
+                                    trackId = mediaId,
+                                    title = title,
+                                    artist = artist,
+                                    album = album,
+                                    thumbnailUrl = thumbnailUrl,
+                                    duration = if (duration > 0 && duration != C.TIME_UNSET) duration else null,
+                                    url = streamingUrl
+                                )
+                                
+                                // Show toast notification
+                                withContext(Dispatchers.Main) {
+                                    toast(getString(R.string.auto_download_started, title))
+                                }
+                            } else {
+                                showDebugNotification("No URL found for: $title")
+                            }
+                        } catch (e: Exception) {
+                            showDebugNotification("Download failed: ${e.message}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                showDebugNotification("Error: ${e.message}")
+            }
+        }
+    }
+
+    private fun showDebugNotification(message: String) {
+        // Solo mostrar notificaciones de debug en versión debug
+        if (!BuildConfig.DEBUG) return
+        
+        handler.post {
+            try {
+                ServiceNotifications.autoDownloadDebug.sendNotification(this@PlayerService) {
+                    this
+                        .setSmallIcon(R.drawable.app_icon)
+                        .setContentTitle("Auto-Download Debug")
+                        .setContentText(message)
+                        .setOngoing(false)
+                        .setAutoCancel(true)
+                        .setPriority(NotificationCompat.PRIORITY_LOW)
+                }
+            } catch (e: Exception) {
+                // Ignore notification errors
+            }
+        }
+    }
+
+    /**
+     * Verifica si hay suficiente espacio de almacenamiento disponible
+     * @return true si el almacenamiento está por debajo del 95%, false si está al 95% o más
+     */
+    private fun hasAvailableStorage(): Boolean {
+        return try {
+            val stat = StatFs(applicationContext.filesDir.path)
+            val totalBytes = stat.blockCountLong * stat.blockSizeLong
+            val availableBytes = stat.availableBlocksLong * stat.blockSizeLong
+            val usedBytes = totalBytes - availableBytes
+            val usagePercentage = (usedBytes.toDouble() / totalBytes.toDouble()) * 100
+            
+            // Convertir a GB para mejor legibilidad
+            val totalGB = totalBytes / (1024.0 * 1024.0 * 1024.0)
+            val availableGB = availableBytes / (1024.0 * 1024.0 * 1024.0)
+            
+            showDebugNotification(
+                "Storage: ${usagePercentage.toInt()}% used " +
+                "(${String.format("%.1f", availableGB)}GB free / ${String.format("%.1f", totalGB)}GB total)"
+            )
+            
+            val hasSpace = usagePercentage < 95.0
+            if (!hasSpace) {
+                showDebugNotification("⚠️ Storage limit reached! Auto-download will be disabled.")
+            }
+            
+            hasSpace
+        } catch (e: Exception) {
+            showDebugNotification("Storage check failed: ${e.message}")
+            // En caso de error, permitir la descarga por defecto
+            true
+        }
     }
 
     private fun maybeResumePlaybackWhenDeviceConnected() {
