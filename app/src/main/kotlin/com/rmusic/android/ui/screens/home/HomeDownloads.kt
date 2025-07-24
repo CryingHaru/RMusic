@@ -85,11 +85,14 @@ import kotlinx.collections.immutable.toImmutableMap
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun HomeDownloads(onSearchClick: () -> Unit) {
+fun HomeDownloads(
+    onSearchClick: () -> Unit,
+    onArtistClick: (String) -> Unit
+) {
     val (colorPalette, typography) = LocalAppearance.current
     val binder = LocalPlayerServiceBinder.current
     
-    val downloadedArtists by Database.downloadedArtists().collectAsState(initial = emptyList())
+    val downloadedArtists by Database.downloadedArtistsData().collectAsState(initial = emptyList())
     val downloadsCount by Database.downloadedSongsCount().collectAsState(initial = 0)
     val totalSize by Database.totalDownloadedSize().collectAsState(initial = 0L)
     
@@ -194,16 +197,19 @@ fun HomeDownloads(onSearchClick: () -> Unit) {
             if (downloadedArtists.isNotEmpty()) {
                 items(
                     count = downloadedArtists.size,
-                    key = { index -> downloadedArtists[index] }
+                    key = { index -> downloadedArtists[index].id }
                 ) { index ->
                     val artist = downloadedArtists[index]
-                    val songsByArtist by Database.downloadedSongsByArtist(artist).collectAsState(initial = emptyList())
-                    val albumsByArtist by Database.downloadedAlbumsByArtist(artist).collectAsState(initial = emptyList())
+                    val songsByArtist by Database.downloadedSongsByArtistId(artist.id).collectAsState(initial = emptyList())
+                    val albumsByArtist by Database.downloadedAlbumsByArtistId(artist.id).collectAsState(initial = emptyList())
                     
                     if (songsByArtist.isNotEmpty()) {
                         Column(modifier = Modifier.padding(vertical = 8.dp)) {
                             // Artist header with thumbnail
-                            ArtistHeader(artist = artist)
+                            ArtistHeader(
+                                artist = artist,
+                                onClick = { onArtistClick(artist.id) }
+                            )
 
                             // Show albums if available
                             if (albumsByArtist.isNotEmpty()) {
@@ -217,7 +223,7 @@ fun HomeDownloads(onSearchClick: () -> Unit) {
                                 ) {
                                     items(albumsByArtist) { album ->
                                         AlbumCard(
-                                            artist = artist,
+                                            artist = artist.name,
                                             album = album,
                                             onClick = { /* Navigate to album downloads */ }
                                         )
@@ -395,30 +401,22 @@ private fun DownloadItemRow(item: DownloadItem) {
 }
 
 @Composable
-private fun ArtistHeader(artist: String) {
+private fun ArtistHeader(
+    artist: com.rmusic.android.models.DownloadedArtist,
+    onClick: () -> Unit
+) {
     val (colorPalette, typography) = LocalAppearance.current
     // Get the first song by this artist to extract thumbnail info
-    val songsByArtist by Database.downloadedSongsByArtist(artist).collectAsState(initial = emptyList())
+    val songsByArtist by Database.downloadedSongsByArtistId(artist.id).collectAsState(initial = emptyList())
     val firstSong = songsByArtist.firstOrNull()
     
     // Try to find artist thumbnail first, then fallback to song thumbnail
-    val artistThumbnailUrl = firstSong?.let { song ->
-        try {
-            val songFile = java.io.File(song.filePath)
-            val artistThumbnail = java.io.File(songFile.parentFile?.parentFile, "artist.jpg")
-            if (artistThumbnail.exists()) {
-                "file://${artistThumbnail.absolutePath}"
-            } else {
-                song.thumbnailUrl // Fallback to song thumbnail
-            }
-        } catch (e: Exception) {
-            song.thumbnailUrl // Fallback on error
-        }
-    }
+    val artistThumbnailUrl = artist.thumbnailUrl ?: firstSong?.thumbnailUrl
     
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .background(
                 color = if (colorPalette.isDark) 
                     colorPalette.background1 
@@ -449,7 +447,7 @@ private fun ArtistHeader(artist: String) {
         
         Column {
             Text(
-                text = artist,
+                text = artist.name,
                 style = typography.l.copy(fontWeight = FontWeight.Bold),
                 color = colorPalette.text
             )

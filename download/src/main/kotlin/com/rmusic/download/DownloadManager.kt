@@ -59,7 +59,8 @@ class DownloadManager(
         }
         
         // Create organized directory structure: Artist/Album/ (Music dir already handled by service)
-        val artistDir = File(downloadDir, sanitizeFilename(artist ?: "Unknown Artist"))
+        val primaryArtist = artist?.split(Regex("[,&]"))?.first()?.trim() ?: "Unknown Artist"
+        val artistDir = File(downloadDir, sanitizeFilename(primaryArtist))
         val albumDir = File(artistDir, sanitizeFilename(album ?: "Unknown Album"))
         albumDir.mkdirs()
         

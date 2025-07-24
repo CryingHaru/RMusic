@@ -47,41 +47,12 @@ import androidx.compose.runtime.collectAsState
 @Route
 @Composable
 fun HomeArtistList(
-    onArtistClick: (Artist) -> Unit,
+    onArtistClick: (com.rmusic.android.models.DownloadedArtist) -> Unit,
     onSearchClick: () -> Unit
 ) = with(OrderPreferences) {
     val (colorPalette) = LocalAppearance.current
 
-    // Get downloaded artists from songs instead of DownloadedArtist table
-    val downloadedArtists by Database.downloadedArtists().collectAsState(initial = emptyList())
-    val downloadedSongs by Database.downloadedSongs().collectAsState(initial = emptyList())
-    
-    // Create artist objects with thumbnails from their songs
-    val items = downloadedArtists.mapNotNull { artistName ->
-        val firstSong = downloadedSongs.find { it.artistsText == artistName }
-        firstSong?.let { song ->
-            // Try to find artist thumbnail first, then fallback to song thumbnail
-            val artistThumbnailUrl = try {
-                val songFile = java.io.File(song.filePath)
-                val artistThumbnail = java.io.File(songFile.parentFile?.parentFile, "artist.jpg")
-                if (artistThumbnail.exists()) {
-                    "file://${artistThumbnail.absolutePath}"
-                } else {
-                    song.thumbnailUrl // Fallback to song thumbnail
-                }
-            } catch (e: Exception) {
-                song.thumbnailUrl // Fallback on error
-            }
-            
-            Artist(
-                id = "downloaded_${artistName.hashCode()}",
-                name = artistName,
-                thumbnailUrl = artistThumbnailUrl,
-                timestamp = song.downloadedAt,
-                bookmarkedAt = null
-            )
-        }
-    }.toImmutableList()
+    val items by Database.downloadedArtistsData().collectAsState(initial = emptyList())
 
     val sortOrderIconRotation by animateFloatAsState(
         targetValue = if (artistSortOrder == SortOrder.Ascending) 0f else 180f,
@@ -135,9 +106,15 @@ fun HomeArtistList(
                 }
             }
 
-            items(items = items, key = Artist::id) { artist ->
+            items(items = items, key = { it.id }) { artist ->
                 ArtistItem(
-                    artist = artist,
+                    artist = Artist(
+                        id = artist.id,
+                        name = artist.name,
+                        thumbnailUrl = artist.thumbnailUrl,
+                        timestamp = artist.downloadedAt ?: 0,
+                        bookmarkedAt = artist.bookmarkedAt
+                    ),
                     thumbnailSize = Dimensions.thumbnails.song * 2,
                     alternative = true,
                     modifier = Modifier

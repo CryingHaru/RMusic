@@ -83,16 +83,12 @@ interface Database {
     fun downloadedSongs(): Flow<List<DownloadedSong>>
 
     @Transaction
-    @Query("SELECT * FROM DownloadedSong WHERE artistsText = :artist ORDER BY albumTitle, title")
-    fun downloadedSongsByArtist(artist: String): Flow<List<DownloadedSong>>
-
-    @Transaction
     @Query("SELECT DISTINCT artistsText FROM DownloadedSong WHERE artistsText IS NOT NULL ORDER BY artistsText")
     fun downloadedArtists(): Flow<List<String>>
 
     @Transaction
-    @Query("SELECT DISTINCT albumTitle FROM DownloadedSong WHERE artistsText = :artist AND albumTitle IS NOT NULL ORDER BY albumTitle")
-    fun downloadedAlbumsByArtist(artist: String): Flow<List<String>>
+    @Query("SELECT DISTINCT albumTitle FROM DownloadedSong WHERE artistIds LIKE '%' || :artistId || '%' AND albumTitle IS NOT NULL ORDER BY albumTitle")
+    fun downloadedAlbumsByArtistId(artistId: String): Flow<List<String>>
 
     @Transaction
     @Query("SELECT DISTINCT albumTitle FROM DownloadedSong WHERE albumTitle IS NOT NULL ORDER BY albumTitle")

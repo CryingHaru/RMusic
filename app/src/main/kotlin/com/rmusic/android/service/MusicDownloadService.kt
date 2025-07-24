@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import java.io.File
+import kotlinx.coroutines.delay
 
 // Global state for downloads
 private val mutableDownloadState = MutableStateFlow(false)
@@ -68,6 +69,7 @@ class MusicDownloadService : InvincibleService() {
     private var currentActiveDownloads: List<DownloadItem> = emptyList()
     private val ongoingAlbumArtDownloads = mutableSetOf<String>()
     private val ongoingArtistArtDownloads = mutableSetOf<String>()
+    private val stuckDownloadJobs = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
     
     private val httpClient = HttpClient(OkHttp) {
         expectSuccess = false // Allow handling of non-success responses
@@ -166,13 +168,76 @@ class MusicDownloadService : InvincibleService() {
         // Monitor completed downloads to add to database
         scope.launch {
             downloadManager.downloads.collect { downloadsMap ->
-                android.util.Log.d(TAG, "Downloads map updated: ${downloadsMap.size} items")
                 downloadsMap.values.forEach { downloadItem ->
-                    if (downloadItem.state is DownloadState.Completed) {
+                    // Always cancel the previous watchdog job and create a new one if the download is active.
+                    stuckDownloadJobs.remove(downloadItem.id)?.cancel()
+
+                    when (val state = downloadItem.state) {
+                        is DownloadState.Downloading -> {
+                            // This watchdog will trigger if no new progress update is received for 15s.
+                            stuckDownloadJobs[downloadItem.id] = scope.launch {
+                                delay(15000)
+                                android.util.Log.w(TAG, "Download for ${downloadItem.title} appears to be stuck at ${(state.progress * 100).toInt()}%. Retrying.")
+                                retryDownload(downloadItem)
+                            }
+                        }
+                        is DownloadState.Completed -> {
                         saveCompletedDownload(downloadItem)
+                    }
+                        // For any other state, we don't need a watchdog.
+                        // The job is already removed at the start of the loop.
+                        else -> {}
+                    }
+                }
+                // Clean up jobs for downloads that are no longer in the map (e.g., cancelled directly)
+                val currentDownloadIds = downloadsMap.keys
+                stuckDownloadJobs.keys.forEach { jobId ->
+                    if (jobId !in currentDownloadIds) {
+                        stuckDownloadJobs.remove(jobId)?.cancel()
                     }
                 }
             }
+        }
+    }
+    
+    private fun retryDownload(item: DownloadItem) {
+        scope.launch {
+            android.util.Log.d(TAG, "Cancelling stalled download for ${item.title}")
+            downloadManager.cancelDownload(item.id)
+
+            // A small delay to ensure cancellation is processed before retrying
+            delay(250)
+
+            val song = try {
+                Database.song(item.id).firstOrNull()
+            } catch (e: Exception) {
+                null
+            }
+
+            if (song == null) {
+                android.util.Log.e(TAG, "Cannot retry download, song with id ${item.id} not found in database.")
+                return@launch
+            }
+
+            android.util.Log.d(TAG, "Force re-fetching URL from Innertube for ${song.title}")
+            val newUrl = generateStreamingUrl(song, forceRefresh = true)
+
+            if (newUrl == null) {
+                android.util.Log.e(TAG, "Failed to get a new download URL for ${song.title}. Cannot retry.")
+                return@launch
+            }
+
+            android.util.Log.d(TAG, "Retrying download for ${song.title} with new URL.")
+            downloadManager.downloadTrack(
+                providerId = "kdownloader",
+                trackId = item.id,
+                title = item.title,
+                artist = item.artist,
+                album = item.album,
+                thumbnailUrl = item.thumbnailUrl,
+                duration = item.duration,
+                url = newUrl
+            )
         }
     }
     
@@ -217,11 +282,12 @@ class MusicDownloadService : InvincibleService() {
                     // If we don't have artist info from database, try to create one from downloadItem.artist
                     val fallbackArtistInfo = if (artistsInfo.isEmpty() && !downloadItem.artist.isNullOrBlank()) {
                         android.util.Log.d(TAG, "Creating fallback artist info from downloadItem.artist: ${downloadItem.artist}")
-                        val artistName = downloadItem.artist!!
-                        listOf(com.rmusic.android.models.Info(
-                            id = "fallback_${artistName.hashCode()}",
-                            name = artistName
-                        ))
+                        downloadItem.artist!!.split(Regex("[,&]")).map { artistName ->
+                            com.rmusic.android.models.Info(
+                                id = "fallback_${artistName.trim().hashCode()}",
+                                name = artistName.trim()
+                            )
+                        }
                     } else {
                         emptyList()
                     }
@@ -268,15 +334,15 @@ class MusicDownloadService : InvincibleService() {
                     scope.launch {
                         // Download album cover if available
                         albumInfo?.let { info ->
-                            val albumCoverUrl = downloadItem.thumbnailUrl
-                                ?: originalSong?.thumbnailUrl
+                        val albumCoverUrl = downloadItem.thumbnailUrl 
+                            ?: originalSong?.thumbnailUrl 
                                 ?: try {
                                     Database.album(info.id).first()?.thumbnailUrl
                                 } catch (e: Exception) {
                                     null
-                                }
-
-                            albumCoverUrl?.let { thumbnailUrl ->
+                            }
+                        
+                        albumCoverUrl?.let { thumbnailUrl ->
                                 android.util.Log.d(TAG, "Queueing album cover download: $thumbnailUrl")
                                 downloadAlbumCoverWithKDownloader(info.id, thumbnailUrl, file.parentFile, "cover.jpg")
                             }
@@ -288,13 +354,14 @@ class MusicDownloadService : InvincibleService() {
                         }
                     }
                     
-                    albumInfo?.let { info ->
+                    if (albumInfo != null) {
+                        // This is an album download. Be strict about only adding the main album artist.
                         try {
-                            val albumData = Database.album(info.id).first()
+                            val albumData = Database.album(albumInfo.id).firstOrNull()
                             albumData?.let { album ->
                                 val downloadedAlbum = DownloadedAlbum(
                                     id = album.id,
-                                    title = album.title ?: info.name ?: "Unknown Album",
+                                    title = album.title ?: albumInfo.name ?: "Unknown Album",
                                     description = album.description,
                                     thumbnailUrl = File(file.parentFile, "cover.jpg").let { localCover ->
                                         if (localCover.exists()) "file://${localCover.absolutePath}" 
@@ -304,16 +371,42 @@ class MusicDownloadService : InvincibleService() {
                                     authorsText = album.authorsText,
                                     shareUrl = album.shareUrl,
                                     otherInfo = album.otherInfo,
-                                    songCount = 1 // We'll update this with actual count later
+                                    songCount = 1 // This will be updated later
                                 )
                                 Database.insert(downloadedAlbum)
                             }
+
+                            val albumArtistName = albumData?.authorsText?.split(Regex("[,&]"))?.first()?.trim()
+                            if (albumArtistName != null) {
+                                val primaryArtistInfo = finalArtistsInfo.find { it.name?.trim().equals(albumArtistName, ignoreCase = true) }
+                                if (primaryArtistInfo != null) {
+                                    processDownloadedArtist(primaryArtistInfo, file)
+                                } else {
+                                    android.util.Log.w(TAG, "Could not find main album artist '$albumArtistName' in song's artist list. No artist processed for this track to avoid adding collaborators.")
+                                }
+                            } else {
+                                // Fallback for albums with no main artist specified: use the song's first artist.
+                                finalArtistsInfo.firstOrNull()?.let { processDownloadedArtist(it, file) }
+                            }
                         } catch (e: Exception) {
-                            android.util.Log.e(TAG, "Failed to process album info", e)
+                            android.util.Log.e(TAG, "Failed to process album/artist info", e)
+                        }
+                    } else {
+                        // This is not part of an album download (e.g., a single track).
+                        // To avoid clutter, only process the first artist.
+                        finalArtistsInfo.firstOrNull()?.let { artistInfo ->
+                            processDownloadedArtist(artistInfo, file)
                         }
                     }
-                    
-                    finalArtistsInfo.forEach { artistInfo ->
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error in saveCompletedDownload for ${downloadItem.title}", e)
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private suspend fun processDownloadedArtist(artistInfo: com.rmusic.android.models.Info, songFile: File) {
                         try {
                             // Check if artist already exists in downloads
                             val existingArtist = try {
@@ -346,7 +439,7 @@ class MusicDownloadService : InvincibleService() {
                                 val downloadedArtist = DownloadedArtist(
                                     id = artistInfo.id,
                                     name = artistInfo.name ?: "Unknown Artist",
-                                    thumbnailUrl = File(file.parentFile?.parentFile, "artist.jpg").let { localThumbnail ->
+                    thumbnailUrl = File(songFile.parentFile?.parentFile, "artist.jpg").let { localThumbnail ->
                                         if (localThumbnail.exists()) "file://${localThumbnail.absolutePath}"
                                         else finalThumbnailUrl
                                     },
@@ -363,13 +456,6 @@ class MusicDownloadService : InvincibleService() {
                             android.util.Log.e(TAG, "Failed to process artist info for ${artistInfo.id}: ${artistInfo.name}", e)
                         }
                     }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "Error in saveCompletedDownload for ${downloadItem.title}", e)
-                e.printStackTrace()
-            }
-        }
-    }
     
     private suspend fun processAndDownloadArtistThumbnail(artistInfo: com.rmusic.android.models.Info, artistDir: File?) {
         if (artistDir == null || artistInfo.id.startsWith("fallback_")) return
@@ -398,8 +484,8 @@ class MusicDownloadService : InvincibleService() {
                     artistThumbnailUrl = artistPageResult?.thumbnail?.url
                     if (artistThumbnailUrl != null) {
                         android.util.Log.d(TAG, "Found artist thumbnail URL: $artistThumbnailUrl")
-                    }
-                } catch (e: Exception) {
+                }
+            } catch (e: Exception) {
                     android.util.Log.w(TAG, "Failed to fetch artist thumbnail from Innertube", e)
                 }
             }
@@ -470,7 +556,7 @@ class MusicDownloadService : InvincibleService() {
         if (artistDir == null) {
             return
         }
-
+        
         try {
             if (!artistDir.exists()) {
                 artistDir.mkdirs()
@@ -814,8 +900,8 @@ class MusicDownloadService : InvincibleService() {
                         // Try to get the song from database to find streaming URL
                         val song = Database.song(trackId).firstOrNull()
                         if (song != null) {
-                            // Generate streaming URL using providers
-                            val url = generateStreamingUrl(song)
+                            // Generate streaming URL using providers, always forcing a refresh for batch jobs
+                            val url = generateStreamingUrl(song, forceRefresh = true)
                             if (url != null) {
                                 downloadManager.downloadTrack(
                                     providerId = "kdownloader",
@@ -829,8 +915,6 @@ class MusicDownloadService : InvincibleService() {
                                 )
                                 android.util.Log.d(TAG, "Started download for playlist song: $title")
                                 
-                                // Add small delay between downloads to avoid overwhelming the system
-                                kotlinx.coroutines.delay(500)
                             } else {
                                 android.util.Log.w(TAG, "Could not generate URL for song: $title")
                             }
@@ -878,8 +962,8 @@ class MusicDownloadService : InvincibleService() {
                         // Try to get the song from database to find streaming URL
                         val song = Database.song(trackId).firstOrNull()
                         if (song != null) {
-                            // Generate streaming URL using providers
-                            val url = generateStreamingUrl(song)
+                            // Generate streaming URL using providers, always forcing a refresh for batch jobs
+                            val url = generateStreamingUrl(song, forceRefresh = true)
                             if (url != null) {
                                 downloadManager.downloadTrack(
                                     providerId = "kdownloader",
@@ -893,8 +977,6 @@ class MusicDownloadService : InvincibleService() {
                                 )
                                 android.util.Log.d(TAG, "Started download for album song: $title")
 
-                                // Add small delay between downloads to avoid overwhelming the system
-                                kotlinx.coroutines.delay(500)
                             } else {
                                 android.util.Log.w(TAG, "Could not generate URL for song: $title")
                             }
@@ -913,15 +995,19 @@ class MusicDownloadService : InvincibleService() {
         }
     }
     
-    private suspend fun generateStreamingUrl(song: com.rmusic.android.models.Song): String? {
+    private suspend fun generateStreamingUrl(song: com.rmusic.android.models.Song, forceRefresh: Boolean = false): String? {
         return try {
+            if (!forceRefresh) {
             // Try to get the streaming URL from the format in database
             val format = Database.format(song.id).firstOrNull()
             if (format != null && !format.url.isNullOrBlank()) {
                 return format.url
+                }
             }
 
-            // If not in database, fetch from Innertube
+            // If not in database or force-refresh, fetch from Innertube, but with a delay to avoid rate-limiting
+            kotlinx.coroutines.delay(1500)
+            
             Innertube.player(PlayerBody(videoId = song.id))?.getOrNull()?.let { playerResponse ->
                 val bestFormat = playerResponse.streamingData?.adaptiveFormats
                     ?.filter { it.mimeType.contains("audio/mp4") && it.bitrate != null && it.url != null }

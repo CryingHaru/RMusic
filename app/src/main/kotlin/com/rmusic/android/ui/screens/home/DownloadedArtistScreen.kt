@@ -40,6 +40,19 @@ import com.rmusic.android.utils.playingSong
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.utils.isLandscape
+import com.rmusic.android.models.DownloadedSong
+import com.rmusic.android.models.Song
+
+fun DownloadedSong.toSong(): Song {
+    return Song(
+        id = this.id,
+        title = this.title,
+        artistsText = this.artistsText,
+        durationText = this.durationText,
+        thumbnailUrl = this.thumbnailUrl
+    )
+}
+
 
 @OptIn(ExperimentalFoundationApi::class)
 @Route

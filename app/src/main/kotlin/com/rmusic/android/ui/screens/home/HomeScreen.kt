@@ -122,7 +122,8 @@ fun HomeScreen() {
                         )
 
                         5 -> HomeDownloads(
-                            onSearchClick = onSearchClick
+                            onSearchClick = onSearchClick,
+                            onArtistClick = { downloadedArtistRoute(it) }
                         )
                     }
                 }
