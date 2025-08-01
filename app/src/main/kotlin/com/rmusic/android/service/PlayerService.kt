@@ -18,6 +18,8 @@ import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.PresetReverb
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.StatFs
 import android.os.SystemClock
@@ -309,6 +311,10 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     private var bassBoost: BassBoost? = null
     private var reverb: PresetReverb? = null
 
+    // Store detailed error information for UI access
+    @Volatile
+    private var lastDetailedError: String? = null
+
     private val binder = Binder()
 
     private var isNotificationStarted = false
@@ -337,6 +343,13 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
     // Track songs that have reached 50% playback for auto-download
     private val autoDownloadedSongs = mutableSetOf<String>()
+
+    // Sistema de reproducción inteligente para manejar errores de source
+    private var retryCount = 0
+    private var maxRetries = 2
+    private var retryDelayMs = 1000L // Reducido de 2000ms a 1000ms para reintentos más rápidos
+    private var currentRetryJob: Job? = null
+    private val retryAttempts = mutableMapOf<String, Int>()
 
     private val glyphInterface by lazy { GlyphInterface(applicationContext) }
 
@@ -515,6 +528,10 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         runCatching {
             maybeSavePlayerQueue()
 
+            // Limpiar sistema de reproducción inteligente
+            currentRetryJob?.cancel()
+            retryAttempts.clear()
+
             // Limpiar caché temporal al cerrar
             temporalCache.clearAll(cache)
 
@@ -599,6 +616,20 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                 autoDownloadedSongs.clear()
                 autoDownloadedSongs.addAll(recentSongs)
             }
+
+            // Limpiar contadores de reintento para canciones exitosas
+            // Solo mantener los últimos 3 intentos para evitar acumulación de memoria
+            currentId?.let { 
+                retryAttempts.remove(it)
+                if (retryAttempts.size > 3) {
+                    val recentRetries = retryAttempts.toList().takeLast(3).toMap()
+                    retryAttempts.clear()
+                    retryAttempts.putAll(recentRetries)
+                }
+            }
+            
+            // Cancelar trabajos de reintento activos al cambiar de canción
+            currentRetryJob?.cancel()
         }
 
         // Actualizar caché temporal inteligente
@@ -628,15 +659,72 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     }
 
     override fun onPlayerError(error: PlaybackException) {
+        val mediaItem = player.currentMediaItem
+        val mediaId = mediaItem?.mediaId ?: ""
+        val attempts = retryAttempts.getOrDefault(mediaId, 0)
+        
+        // Crear mensaje de error detallado para debug
+        val detailedError = buildString {
+            append("PlaybackException: ")
+            append("errorCode=${error.errorCode}, ")
+            append("message='${error.message}', ")
+            append("cause=${error.cause?.javaClass?.simpleName}:'${error.cause?.message}', ")
+            
+            // Buscar causas específicas
+            error.findCause<InvalidResponseCodeException>()?.let { httpError ->
+                append("HTTP_${httpError.responseCode}, ")
+            }
+            error.findCause<java.net.UnknownHostException>()?.let { 
+                append("DNS_FAILURE, ")
+            }
+            error.findCause<java.net.SocketTimeoutException>()?.let { 
+                append("TIMEOUT, ")
+            }
+            error.findCause<java.net.ConnectException>()?.let { 
+                append("CONNECTION_FAILED, ")
+            }
+            error.findCause<javax.net.ssl.SSLException>()?.let { 
+                append("SSL_ERROR, ")
+            }
+            
+            append("stackTrace=${error.stackTraceToString().take(200)}")
+        }
+        
+        // Log completo del error
+        Log.e(TAG, "PlaybackError (attempt ${attempts + 1}/$maxRetries): $detailedError", error)
+        
+        // Mostrar error raw en debug
+        if (BuildConfig.DEBUG) {
+            showDebugNotification("RAW ERROR: $detailedError")
+        }
+        
+        // Intentar recuperación inteligente antes de mostrar error o saltar
+        if (shouldRetryPlayback(error)) {
+            showDebugNotification("Attempting retry for error: ${error.errorCode}")
+            handleIntelligentRetry(error)
+            return
+        }
+
         // Mostrar mensaje de error detallado
-        val detailed = error.message ?: error::class.simpleName ?: "Unknown"
-        toast(getString(R.string.playback_error, detailed))
+        val userFriendlyError = if (BuildConfig.DEBUG) {
+            // En debug, mostrar más detalles
+            "Code:${error.errorCode} ${error.message ?: error::class.simpleName}"
+        } else {
+            // En release, mensaje más amigable
+            error.message ?: error::class.simpleName ?: "Unknown"
+        }
+        
+        if (attempts > 0) {
+            toast(getString(R.string.playback_error, "$userFriendlyError (reintentos agotados: $attempts/$maxRetries)"))
+        } else {
+            toast(getString(R.string.playback_error, userFriendlyError))
+        }
 
         super.onPlayerError(error)
 
-        if (
-            error.findCause<InvalidResponseCodeException>()?.responseCode == 416
-        ) {
+        // Caso especial para error 416 (Range Not Satisfiable)
+        if (error.findCause<InvalidResponseCodeException>()?.responseCode == 416) {
+            showDebugNotification("Handling 416 error with pause/prepare/play")
             player.pause()
             player.prepare()
             player.play()
@@ -682,6 +770,311 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         } catch (e: Exception) {
             // Ignorar errores del caché temporal
             Log.w(TAG, "Error updating temporal cache", e)
+        }
+    }
+
+    /**
+     * Verifica si hay conexión a internet disponible
+     */
+    private fun isNetworkConnected(): Boolean {
+        return try {
+            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivityManager.activeNetwork ?: return false
+            val networkCapabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+            
+            networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+            networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error checking network connectivity", e)
+            false
+        }
+    }
+
+    /**
+     * Determina si el error requiere un reintento inteligente
+     */
+    private fun shouldRetryPlayback(error: PlaybackException): Boolean {
+        val mediaItem = player.currentMediaItem ?: return false
+        val mediaId = mediaItem.mediaId
+        
+        // No reintentar archivos locales
+        if (mediaId.startsWith(LOCAL_KEY_PREFIX)) return false
+        
+        // Obtener número de intentos para esta canción
+        val attempts = retryAttempts.getOrDefault(mediaId, 0)
+        if (attempts >= maxRetries) return false
+        
+        // Log detallado para debug
+        if (BuildConfig.DEBUG) {
+            val shouldRetry = when {
+                // Errores de red/conectividad - siempre reintentar
+                error.findCause<java.net.UnknownHostException>() != null -> "DNS_FAILURE"
+                error.findCause<java.net.SocketTimeoutException>() != null -> "SOCKET_TIMEOUT"
+                error.findCause<java.net.ConnectException>() != null -> "CONNECTION_FAILED"
+                error.findCause<javax.net.ssl.SSLException>() != null -> "SSL_ERROR"
+                
+                // Errores HTTP que pueden ser temporales
+                error.findCause<InvalidResponseCodeException>()?.let { httpError ->
+                    when (httpError.responseCode) {
+                        500, 502, 503, 504 -> "HTTP_SERVER_ERROR_${httpError.responseCode}"
+                        429 -> "HTTP_RATE_LIMIT"
+                        403 -> "HTTP_FORBIDDEN"
+                        404 -> "HTTP_NOT_FOUND"
+                        else -> null
+                    }
+                } != null -> "HTTP_ERROR"
+                
+                // Errores de ExoPlayer que pueden ser temporales
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> "EXOPLAYER_NETWORK_FAILED"
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "EXOPLAYER_NETWORK_TIMEOUT"
+                error.errorCode == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE -> "EXOPLAYER_READ_OUT_OF_RANGE"
+                error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED -> "EXOPLAYER_IO_UNSPECIFIED"
+                error.errorCode == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE -> "EXOPLAYER_INVALID_CONTENT_TYPE"
+                error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "EXOPLAYER_BAD_HTTP_STATUS"
+                error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED -> "EXOPLAYER_CONTAINER_MALFORMED"
+                error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED -> "EXOPLAYER_MANIFEST_MALFORMED"
+                
+                // Errores que contienen palabras clave relacionadas con streaming
+                error.message?.contains("innertube", ignoreCase = true) == true -> "INNERTUBE_ERROR"
+                error.message?.contains("youtube", ignoreCase = true) == true -> "YOUTUBE_ERROR"
+                error.message?.contains("source", ignoreCase = true) == true -> "SOURCE_ERROR"
+                error.message?.contains("stream", ignoreCase = true) == true -> "STREAM_ERROR"
+                error.message?.contains("network", ignoreCase = true) == true -> "NETWORK_ERROR"
+                error.message?.contains("connection", ignoreCase = true) == true -> "CONNECTION_ERROR"
+                error.message?.contains("timeout", ignoreCase = true) == true -> "TIMEOUT_ERROR"
+                
+                else -> null
+            }
+            
+            if (shouldRetry != null) {
+                showDebugNotification("RETRY REASON: $shouldRetry (attempt ${attempts + 1}/$maxRetries)")
+            } else {
+                showDebugNotification("NO RETRY: Error not retryable")
+            }
+        }
+        
+        // Verificar tipos de error que pueden beneficiarse de reintento
+        return when {
+            // Errores de red/conectividad - siempre reintentar
+            error.findCause<java.net.UnknownHostException>() != null -> true
+            error.findCause<java.net.SocketTimeoutException>() != null -> true
+            error.findCause<java.net.ConnectException>() != null -> true
+            error.findCause<javax.net.ssl.SSLException>() != null -> true
+            
+            // Errores HTTP que pueden ser temporales
+            error.findCause<InvalidResponseCodeException>()?.let { httpError ->
+                httpError.responseCode in listOf(500, 502, 503, 504, 429, 403, 404, 410, 412)
+            } == true -> true
+            
+            // Errores de source que pueden ser temporales - más agresivo para Innertube
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> true
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> true
+            error.errorCode == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE -> true
+            error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED -> true
+            error.errorCode == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE -> true
+            error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> true
+            
+            // Errores de fuente/source - comunes con Innertube
+            error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED -> true
+            error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED -> true
+            
+            // Cualquier error que contenga palabras clave de Innertube/YouTube
+            error.message?.contains("innertube", ignoreCase = true) == true -> true
+            error.message?.contains("youtube", ignoreCase = true) == true -> true
+            error.message?.contains("source", ignoreCase = true) == true -> true
+            error.message?.contains("stream", ignoreCase = true) == true -> true
+            error.message?.contains("network", ignoreCase = true) == true -> true
+            error.message?.contains("connection", ignoreCase = true) == true -> true
+            error.message?.contains("timeout", ignoreCase = true) == true -> true
+            
+            else -> false
+        }
+    }
+
+    /**
+     * Maneja el reintento inteligente de reproducción
+     */
+    private fun handleIntelligentRetry(error: PlaybackException) {
+        val mediaItem = player.currentMediaItem ?: return
+        val mediaId = mediaItem.mediaId
+        
+        // Cancelar trabajo de reintento anterior si existe
+        currentRetryJob?.cancel()
+        
+        // Incrementar contador de intentos
+        val attempts = retryAttempts.getOrDefault(mediaId, 0) + 1
+        retryAttempts[mediaId] = attempts
+        
+        val title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown"
+        
+        showDebugNotification("Reintentando reproducción ($attempts/$maxRetries): $title")
+        
+        // Verificar conexión antes de reintentar
+        if (!isNetworkConnected()) {
+            showDebugNotification("Sin conexión a internet, esperando...")
+            // Esperar más tiempo si no hay red
+            scheduleRetryWithNetworkCheck(mediaItem, attempts, retryDelayMs * 3)
+            return
+        }
+        
+        currentRetryJob = coroutineScope.launch {
+            try {
+                // Calcular delay - primer intento inmediato, segundo con delay mínimo
+                val delay = if (attempts == 1) {
+                    // Primer reintento inmediato para errores de Innertube/source
+                    200L // Solo una pequeña pausa para estabilizar
+                } else {
+                    // Segundo reintento con delay progresivo
+                    retryDelayMs * attempts
+                }
+                
+                if (delay > 200L) {
+                    showDebugNotification("Esperando ${delay}ms antes del reintento...")
+                }
+                delay(delay)
+                
+                // Verificar que el contexto sigue activo y que seguimos en la misma canción
+                if (!isActive || player.currentMediaItem?.mediaId != mediaId) {
+                    showDebugNotification("Contexto cambió, cancelando reintento")
+                    return@launch
+                }
+                
+                // Verificar conexión nuevamente antes del reintento
+                if (!isNetworkConnected()) {
+                    showDebugNotification("Sin conexión, reintentando en 10s...")
+                    delay(10000)
+                    if (!isActive || player.currentMediaItem?.mediaId != mediaId) return@launch
+                }
+                
+                withContext(Dispatchers.Main) {
+                    showDebugNotification("Ejecutando reintento inmediato $attempts/$maxRetries...")
+                    
+                    // Intentar recuperar la reproducción
+                    try {
+                        // Para el primer reintento, usar método más directo
+                        if (attempts == 1) {
+                            // Reintento inmediato - solo pausar y reproducir
+                            val wasPlaying = player.isPlaying
+                            player.pause()
+                            
+                            // Pausa mínima para resetear el estado
+                            delay(100)
+                            
+                            if (player.playWhenReady || wasPlaying) {
+                                player.play()
+                            }
+                        } else {
+                            // Segundo reintento - método más profundo
+                            player.pause()
+                            player.prepare()
+                            
+                            // Pequeña pausa para permitir que se prepare
+                            delay(500)
+                            
+                            if (player.playWhenReady) {
+                                player.play()
+                            }
+                        }
+                        
+                        showDebugNotification("Reintento exitoso para: $title")
+                        
+                        // Limpiar contador de intentos si fue exitoso
+                        // (se limpiará en onMediaItemTransition si la reproducción continúa)
+                        
+                    } catch (e: Exception) {
+                        showDebugNotification("Error en reintento: ${e.message}")
+                        
+                        // Si alcanzamos el máximo de intentos, proceder con el manejo normal de errores
+                        if (attempts >= maxRetries) {
+                            showDebugNotification("Máximo de reintentos alcanzado para: $title")
+                            handleFinalError(error, mediaItem)
+                        }
+                    }
+                }
+                
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    Log.e(TAG, "Error in retry job", e)
+                    showDebugNotification("Error en trabajo de reintento: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Programa un reintento con verificación de red periódica
+     */
+    private fun scheduleRetryWithNetworkCheck(mediaItem: MediaItem, attempts: Int, delayMs: Long) {
+        currentRetryJob = coroutineScope.launch {
+            try {
+                val startTime = System.currentTimeMillis()
+                val maxWaitTime = delayMs * 2 // Máximo tiempo de espera
+                
+                // Esperar hasta que haya conexión o se agote el tiempo
+                while (!isNetworkConnected() && 
+                       (System.currentTimeMillis() - startTime) < maxWaitTime &&
+                       isActive &&
+                       player.currentMediaItem?.mediaId == mediaItem.mediaId) {
+                    
+                    showDebugNotification("Esperando conexión a internet...")
+                    delay(2000) // Verificar cada 2 segundos
+                }
+                
+                if (!isActive || player.currentMediaItem?.mediaId != mediaItem.mediaId) {
+                    return@launch
+                }
+                
+                if (isNetworkConnected()) {
+                    showDebugNotification("Conexión restaurada, reintentando...")
+                    // Continuar con el reintento normal
+                    handleIntelligentRetry(PlaybackException("Network reconnected", null, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED))
+                } else {
+                    showDebugNotification("Sin conexión después de esperar, fallando...")
+                    withContext(Dispatchers.Main) {
+                        handleFinalError(
+                            PlaybackException("Network timeout", null, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT),
+                            mediaItem
+                        )
+                    }
+                }
+                
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    Log.e(TAG, "Error in network check retry", e)
+                }
+            }
+        }
+    }
+
+    /**
+     * Maneja el error final cuando se agotan los reintentos
+     */
+    private fun handleFinalError(error: PlaybackException, mediaItem: MediaItem) {
+        val detailed = error.message ?: error::class.simpleName ?: "Unknown"
+        val title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown"
+        
+        showDebugNotification("Error final después de reintentos: $title")
+        toast(getString(R.string.playback_error, "$detailed (reintentos agotados)"))
+        
+        // Limpiar contador de intentos
+        retryAttempts.remove(mediaItem.mediaId)
+        
+        // Proceder con el manejo normal de errores
+        if (PlayerPreferences.skipOnError && player.hasNextMediaItem()) {
+            player.seekToNextMediaItem()
+            
+            ServiceNotifications.autoSkip.sendNotification(this) {
+                this
+                    .setSmallIcon(R.drawable.app_icon)
+                    .setCategory(NotificationCompat.CATEGORY_ERROR)
+                    .setOnlyAlertOnce(false)
+                    .setContentIntent(activityPendingIntent<MainActivity>())
+                    .setContentText(
+                        getString(R.string.skip_on_error_notification, title)
+                    )
+                    .setContentTitle(getString(R.string.skip_on_error))
+            }
         }
     }
 
@@ -1794,7 +2187,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }.handleUnknownErrors {
             uriCache.clear()
         }.retryIf<UnplayableException>(
-            maxRetries = 3,
+            maxRetries = 2,
             printStackTrace = true
         ).retryIf(
             maxRetries = 1,

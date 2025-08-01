@@ -399,8 +399,6 @@
     <string name="download_behavior">Comportamiento de descarga</string>
     <string name="wifi_only_downloads">Descargas solo con Wi-Fi</string>
     <string name="wifi_only_downloads_description">Solo descargar cuando esté conectado a Wi-Fi</string>
-    <string name="organize_by_artist">Organizar por artista</string>
-    <string name="organize_by_artist_description">Crear estructura de carpetas Artista/Álbum</string>
     <string name="auto_download_at_half">Descarga automática al 50%</string>
     <string name="auto_download_at_half_description">Descargar automáticamente canciones cuando se reproducen al 50%</string>
     <string name="storage_limit_reached_message">Descarga automática pausada: El almacenamiento del dispositivo está al 95% de capacidad</string>

@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -67,6 +68,7 @@ fun DownloadedAlbumScreen(albumId: String) {
     val (colorPalette, typography) = LocalAppearance.current
     val binder = LocalPlayerServiceBinder.current
     val menuState = LocalMenuState.current
+    val context = LocalContext.current
     
     val album by Database.downloadedAlbum(albumId).collectAsState(initial = null)
     val songs by Database.downloadedSongsByAlbumId(albumId).collectAsState(initial = emptyList())
@@ -99,14 +101,14 @@ fun DownloadedAlbumScreen(albumId: String) {
                     // Album cover (centered)
                     AsyncImage(
                         model = album?.let { albumData ->
-                            // Try to use local cover first, fallback to URL
-                            val localCoverPath = songs.firstOrNull()?.let { song ->
-                                val songFile = java.io.File(song.filePath)
-                                val albumDir = songFile.parentFile
-                                val coverFile = java.io.File(albumDir, "cover.jpg")
-                                if (coverFile.exists()) "file://${coverFile.absolutePath}" else null
+                            // Try to use local cover from app's internal directory first, fallback to URL
+                            val albumsImageDir = java.io.File(context.filesDir, "albums")
+                            val localCoverFile = java.io.File(albumsImageDir, "${albumData.id}.jpg")
+                            if (localCoverFile.exists()) {
+                                "file://${localCoverFile.absolutePath}"
+                            } else {
+                                albumData.thumbnailUrl
                             }
-                            localCoverPath ?: albumData.thumbnailUrl
                         },
                         contentDescription = album?.title,
                         contentScale = ContentScale.Crop,

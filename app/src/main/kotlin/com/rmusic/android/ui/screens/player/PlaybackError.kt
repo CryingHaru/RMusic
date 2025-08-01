@@ -73,10 +73,10 @@ fun PlaybackError(
             text = currentMessage,
             style = typography.xs.center.medium.color(colorPalette.onOverlay),
             modifier = Modifier
-                .background(colorPalette.overlay.copy(alpha = 0.4f))
-                .padding(all = 8.dp)
+                .background(colorPalette.overlay.copy(alpha = 0.8f))
+                .padding(all = 12.dp)
                 .fillMaxWidth(),
-            maxLines = if (pip) 1 else Int.MAX_VALUE,
+            maxLines = if (pip) 1 else 20,
             overflow = TextOverflow.Ellipsis
         )
     }

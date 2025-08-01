@@ -141,6 +141,9 @@ class MusicDownloadService : InvincibleService() {
         
         android.util.Log.d(TAG, "DownloadManager initialized")
         
+        // Update local thumbnail URLs for existing artists
+        updateLocalThumbnailUrls()
+        
         // Monitor download state changes
         scope.launch {
             @OptIn(kotlinx.coroutines.FlowPreview::class)
@@ -313,8 +316,8 @@ class MusicDownloadService : InvincibleService() {
                         },
                         albumThumbnailUrl = albumInfo?.let { 
                             try {
-                                val albumDir = file.parentFile
-                                val localCover = File(albumDir, "cover.jpg")
+                                val albumsImageDir = File(filesDir, "albums")
+                                val localCover = File(albumsImageDir, "${it.id}.jpg")
                                 if (localCover.exists()) {
                                     "file://${localCover.absolutePath}"
                                 } else {
@@ -363,7 +366,7 @@ class MusicDownloadService : InvincibleService() {
                                     id = album.id,
                                     title = album.title ?: albumInfo.name ?: "Unknown Album",
                                     description = album.description,
-                                    thumbnailUrl = File(file.parentFile, "cover.jpg").let { localCover ->
+                                    thumbnailUrl = File(filesDir, "albums/${album.id}.jpg").let { localCover ->
                                         if (localCover.exists()) "file://${localCover.absolutePath}" 
                                         else downloadItem.thumbnailUrl ?: album.thumbnailUrl
                                     },
@@ -416,12 +419,17 @@ class MusicDownloadService : InvincibleService() {
                             }
                             
                             if (existingArtist != null) {
-                                // Update song count for existing artist
+                                // Update song count for existing artist and check for local thumbnail
+                                val localThumbnailPath = File(filesDir, "artists/${artistInfo.id}.jpg").let { localThumbnail ->
+                                    if (localThumbnail.exists()) "file://${localThumbnail.absolutePath}" else null
+                                }
+                                
                                 val updatedArtist = existingArtist.copy(
                                     songCount = existingArtist.songCount + 1,
-                                    downloadedAt = System.currentTimeMillis() // Update download timestamp
+                                    downloadedAt = System.currentTimeMillis(), // Update download timestamp
+                                    thumbnailUrl = localThumbnailPath ?: existingArtist.thumbnailUrl // Use local thumbnail if available
                                 )
-                                android.util.Log.d(TAG, "Updating existing DownloadedArtist: id=${artistInfo.id}, songCount=${updatedArtist.songCount}")
+                                android.util.Log.d(TAG, "Updating existing DownloadedArtist: id=${artistInfo.id}, songCount=${updatedArtist.songCount}, thumbnailUrl=${updatedArtist.thumbnailUrl}")
                                 Database.update(updatedArtist)
                             } else {
                                 // Create new DownloadedArtist entry
@@ -439,7 +447,7 @@ class MusicDownloadService : InvincibleService() {
                                 val downloadedArtist = DownloadedArtist(
                                     id = artistInfo.id,
                                     name = artistInfo.name ?: "Unknown Artist",
-                    thumbnailUrl = File(songFile.parentFile?.parentFile, "artist.jpg").let { localThumbnail ->
+                    thumbnailUrl = File(filesDir, "artists/${artistInfo.id}.jpg").let { localThumbnail ->
                                         if (localThumbnail.exists()) "file://${localThumbnail.absolutePath}"
                                         else finalThumbnailUrl
                                     },
@@ -466,7 +474,8 @@ class MusicDownloadService : InvincibleService() {
             return
         }
 
-        val thumbnailFile = File(artistDir, "artist.jpg")
+        val artistsImageDir = File(filesDir, "artists")
+        val thumbnailFile = File(artistsImageDir, "${artistId}.jpg")
         if (thumbnailFile.exists()) {
             android.util.Log.d(TAG, "Artist thumbnail already exists for $artistId")
             return
@@ -484,15 +493,15 @@ class MusicDownloadService : InvincibleService() {
                     artistThumbnailUrl = artistPageResult?.thumbnail?.url
                     if (artistThumbnailUrl != null) {
                         android.util.Log.d(TAG, "Found artist thumbnail URL: $artistThumbnailUrl")
-                }
-            } catch (e: Exception) {
+                    }
+                } catch (e: Exception) {
                     android.util.Log.w(TAG, "Failed to fetch artist thumbnail from Innertube", e)
                 }
             }
 
             artistThumbnailUrl?.let { thumbnailUrl ->
                 android.util.Log.d(TAG, "Queueing artist thumbnail download: $thumbnailUrl")
-                downloadArtistThumbnailWithKDownloader(thumbnailUrl, artistDir, "artist.jpg")
+                downloadArtistThumbnailWithKDownloader(artistId, thumbnailUrl, artistDir, "artist.jpg")
             }
         } catch (e: Exception) {
             android.util.Log.w(TAG, "Error processing artist thumbnail for $artistId", e)
@@ -514,11 +523,13 @@ class MusicDownloadService : InvincibleService() {
         
         ongoingAlbumArtDownloads.add(albumId)
         try {
-            if (!albumDir.exists()) {
-                albumDir.mkdirs()
+            // Save to app's internal directory instead of music folder
+            val albumsImageDir = File(filesDir, "albums")
+            if (!albumsImageDir.exists()) {
+                albumsImageDir.mkdirs()
             }
             
-            val coverFile = File(albumDir, filename)
+            val coverFile = File(albumsImageDir, "${albumId}.jpg")
             if (coverFile.exists()) {
                 return
             }
@@ -530,8 +541,8 @@ class MusicDownloadService : InvincibleService() {
             try {
                 kdownloadProvider.downloadTrack(
                     trackId = "cover_${System.currentTimeMillis()}",
-                    outputDir = albumDir.absolutePath,
-                    filename = filename,
+                    outputDir = albumsImageDir.absolutePath,
+                    filename = "${albumId}.jpg",
                     url = highResUrl
                 ).collect { state ->
                     if (state is DownloadState.Failed) {
@@ -552,17 +563,19 @@ class MusicDownloadService : InvincibleService() {
         }
     }
     
-    private suspend fun downloadArtistThumbnailWithKDownloader(thumbnailUrl: String, artistDir: File?, filename: String) {
+    private suspend fun downloadArtistThumbnailWithKDownloader(artistId: String, thumbnailUrl: String, artistDir: File?, filename: String) {
         if (artistDir == null) {
             return
         }
         
         try {
-            if (!artistDir.exists()) {
-                artistDir.mkdirs()
+            // Save to app's internal directory instead of music folder
+            val artistsImageDir = File(filesDir, "artists")
+            if (!artistsImageDir.exists()) {
+                artistsImageDir.mkdirs()
             }
             
-            val thumbnailFile = File(artistDir, filename)
+            val thumbnailFile = File(artistsImageDir, "${artistId}.jpg")
             if (thumbnailFile.exists()) {
                 return
             }
@@ -574,8 +587,8 @@ class MusicDownloadService : InvincibleService() {
             try {
                 kdownloadProvider.downloadTrack(
                     trackId = "artist_${System.currentTimeMillis()}",
-                    outputDir = artistDir.absolutePath,
-                    filename = filename,
+                    outputDir = artistsImageDir.absolutePath,
+                    filename = "${artistId}.jpg",
                     url = highResUrl
                 ).collect { state ->
                      if (state is DownloadState.Failed) {
@@ -589,8 +602,50 @@ class MusicDownloadService : InvincibleService() {
                     thumbnailFile.writeBytes(response.readRawBytes())
                 }
             }
+            
+            // Update DownloadedArtist with local thumbnail URL after successful download
+            if (thumbnailFile.exists()) {
+                try {
+                    val existingArtist = Database.downloadedArtist(artistId).firstOrNull()
+                    existingArtist?.let { artist ->
+                        val updatedArtist = artist.copy(
+                            thumbnailUrl = "file://${thumbnailFile.absolutePath}"
+                        )
+                        Database.update(updatedArtist)
+                        android.util.Log.d(TAG, "Updated DownloadedArtist thumbnail URL for $artistId: file://${thumbnailFile.absolutePath}")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "Failed to update DownloadedArtist thumbnail URL for $artistId", e)
+                }
+            }
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Failed to download artist thumbnail", e)
+        }
+    }
+    
+    private fun updateLocalThumbnailUrls() {
+        scope.launch {
+            try {
+                val downloadedArtists = Database.downloadedArtistsData().first()
+                downloadedArtists.forEach { artist ->
+                    // Check if artist has a local thumbnail file but is using remote URL
+                    if (artist.thumbnailUrl?.startsWith("file://") != true) {
+                        // Try to find local artist thumbnail in app's internal directory
+                        val artistsImageDir = File(filesDir, "artists")
+                        val artistThumbnailFile = File(artistsImageDir, "${artist.id}.jpg")
+                        
+                        if (artistThumbnailFile.exists()) {
+                            val updatedArtist = artist.copy(
+                                thumbnailUrl = "file://${artistThumbnailFile.absolutePath}"
+                            )
+                            Database.update(updatedArtist)
+                            android.util.Log.d(TAG, "Updated local thumbnail URL for artist: ${artist.name}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "Failed to update local thumbnail URLs", e)
+            }
         }
     }
     

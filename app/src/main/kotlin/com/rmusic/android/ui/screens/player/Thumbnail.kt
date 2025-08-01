@@ -46,6 +46,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.C
+import com.rmusic.android.BuildConfig
 import com.rmusic.android.Database
 import com.rmusic.android.LocalPlayerServiceBinder
 import com.rmusic.android.R
@@ -254,7 +255,33 @@ fun Thumbnail(
                             stringResource(R.string.error_server_restrictions)
 
                         is VideoIdMismatchException -> stringResource(R.string.error_id_mismatch)
-                        else -> stringResource(R.string.error_unknown_playback)
+                        else -> {
+                            // Mostrar información de debug más detallada
+                            val detailedMessage = buildString {
+                                append(stringResource(R.string.error_unknown_playback))
+                                if (com.rmusic.android.BuildConfig.DEBUG && error != null) {
+                                    append("\n\nDEBUG INFO:")
+                                    append("\nError Code: ${error.errorCode}")
+                                    append("\nMessage: ${error.message ?: "N/A"}")
+                                    error.cause?.let { cause ->
+                                        append("\nCause: ${cause::class.simpleName}")
+                                        append("\nCause Message: ${cause.message ?: "N/A"}")
+                                    }
+                                    // Información adicional de causas anidadas
+                                    var currentCause = error.cause
+                                    var level = 1
+                                    while (currentCause != null && level <= 3) {
+                                        append("\nLevel $level Cause: ${currentCause::class.simpleName}")
+                                        currentCause.message?.let { msg ->
+                                            append("\nLevel $level Message: $msg")
+                                        }
+                                        currentCause = currentCause.cause
+                                        level++
+                                    }
+                                }
+                            }
+                            detailedMessage
+                        }
                     }
                 },
                 onDismiss = { binder?.player?.prepare() },

@@ -30,7 +30,6 @@ object DataPreferences : GlobalPreferencesHolder() {
     
     // Download preferences
     var wifiOnlyDownloads by boolean(true)
-    var organizeDownloadsByArtist by boolean(true)
     var downloadQuality by enum(DownloadQuality.High)
 
     enum class TopListPeriod(

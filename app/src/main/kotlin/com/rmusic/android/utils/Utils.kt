@@ -157,6 +157,7 @@ fun String?.thumbnail(
 ): String? {
     val actualSize = size.coerceAtMost(maxSize)
     return when {
+        this?.startsWith("file://") == true -> this // Return local file URLs as-is for downloaded content
         this?.startsWith("https://lh3.googleusercontent.com") == true -> "$this-w$actualSize-h$actualSize"
         this?.startsWith("https://yt3.ggpht.com") == true -> "$this-w$actualSize-h$actualSize-s$actualSize"
         this?.startsWith("https://i.ytimg.com/vi/") == true -> {

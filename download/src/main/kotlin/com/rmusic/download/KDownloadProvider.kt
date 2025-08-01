@@ -136,11 +136,44 @@ class KDownloadProvider(
     }
 
     override fun getDownloadState(downloadId: String): Flow<DownloadState> {
-        TODO("Not yet implemented")
+        return callbackFlow {
+            // Find the KDownloader ID for this download
+            val kDownloadId = downloadIds.values.find { it.toString() == downloadId }
+            
+            if (kDownloadId != null) {
+                val status = kDownloader.status(kDownloadId)
+                val downloadState = when (status) {
+                    Status.QUEUED -> DownloadState.Queued
+                    Status.RUNNING -> DownloadState.Downloading(0f, 0L, -1L) // TODO: Get actual progress
+                    Status.PAUSED -> DownloadState.Paused
+                    Status.COMPLETED -> {
+                        // Try to find the completed file path
+                        val downloadItem = activeDownloads[downloadId]
+                        val filePath = downloadItem?.let { 
+                            File(it.filePath).takeIf { file -> file.exists() }?.absolutePath 
+                        } ?: ""
+                        DownloadState.Completed(filePath)
+                    }
+                    Status.CANCELLED -> DownloadState.Cancelled
+                    Status.FAILED -> DownloadState.Failed(Exception("Download failed"))
+                    else -> DownloadState.Failed(Exception("Unknown status"))
+                }
+                trySend(downloadState)
+            } else {
+                trySend(DownloadState.Failed(Exception("Download not found")))
+            }
+            
+            awaitClose { }
+        }
     }
 
     override fun getAllDownloads(): Flow<List<DownloadItem>> {
-        TODO("Not yet implemented")
+        return callbackFlow {
+            // Return empty list for now - this would need KDownloader database access
+            // which is not exposed in the current API
+            trySend(emptyList())
+            awaitClose { }
+        }
     }
 
     /**

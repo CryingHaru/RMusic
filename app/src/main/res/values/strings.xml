@@ -67,8 +67,6 @@
     <string name="download_behavior">Download Behavior</string>
     <string name="wifi_only_downloads">Wi-Fi only downloads</string>
     <string name="wifi_only_downloads_description">Only download when connected to Wi-Fi</string>
-    <string name="organize_by_artist">Organize by artist</string>
-    <string name="organize_by_artist_description">Create Artist/Album folder structure</string>
     <string name="auto_download_at_half">Auto-download at 50%</string>
     <string name="auto_download_at_half_description">Automatically download songs when played to 50%</string>
     <string name="auto_download_started">Auto-downloading: %s</string>

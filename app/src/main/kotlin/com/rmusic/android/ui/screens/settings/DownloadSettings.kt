@@ -156,13 +156,6 @@ fun DownloadSettings() = with(DataPreferences) {
             )
             
             SwitchSettingsEntry(
-                title = stringResource(R.string.organize_by_artist),
-                text = stringResource(R.string.organize_by_artist_description),
-                isChecked = DataPreferences.organizeDownloadsByArtist,
-                onCheckedChange = { DataPreferences.organizeDownloadsByArtist = it }
-            )
-            
-            SwitchSettingsEntry(
                 title = stringResource(R.string.auto_download_at_half),
                 text = stringResource(R.string.auto_download_at_half_description),
                 isChecked = PlayerPreferences.autoDownloadAtHalf,
