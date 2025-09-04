@@ -35,6 +35,34 @@ android {
     }
 
     signingConfigs {
+        // Carga opcional de variables desde un fichero local no versionado (signing.env)
+        val signingProps = java.util.Properties().apply {
+            val f = rootProject.file("signing.env")
+            if (f.exists()) f.inputStream().use { load(it) }
+        }
+
+        fun propOrEnv(name: String): String? =
+            (signingProps.getProperty(name) ?: System.getenv(name))?.takeIf { it.isNotBlank() }
+
+        val isReleaseTask = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+
+        create("release") {
+            val keystorePath = propOrEnv("RMUSIC_KEYSTORE_PATH") ?: "rmusic-release-key.keystore"
+            val releaseKeystoreFile = rootProject.file(keystorePath)
+
+            // No establecer por defecto valores sensibles; leer de env/props y solo exigirlos en builds release
+            storeFile = releaseKeystoreFile.takeIf { it.exists() }
+            storePassword = propOrEnv("RMUSIC_KEYSTORE_PASSWORD")
+            keyAlias = propOrEnv("RMUSIC_KEY_ALIAS")
+            keyPassword = propOrEnv("RMUSIC_KEY_PASSWORD")
+
+            if (isReleaseTask) {
+                if (storeFile == null || storePassword.isNullOrBlank() || keyAlias.isNullOrBlank() || keyPassword.isNullOrBlank()) {
+                    throw GradleException("Faltan credenciales de firma para 'release'. Crea 'signing.env' a partir de 'signing.env.example' o exporta variables de entorno.")
+                }
+            }
+        }
+
         create("ci") {
             storeFile = System.getenv("ANDROID_NIGHTLY_KEYSTORE")?.let { file(it) }
             storePassword = System.getenv("ANDROID_NIGHTLY_KEYSTORE_PASSWORD")
@@ -54,7 +82,8 @@ android {
             versionNameSuffix = "-RELEASE"
             isMinifyEnabled = true
             isShrinkResources = true
-            manifestPlaceholders["appName"] = "ViTune"
+            manifestPlaceholders["appName"] = "Rmusic"
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -94,13 +123,12 @@ kotlin {
     jvmToolchain(libs.versions.jvm.get().toInt())
 
     compilerOptions {
-        languageVersion.set(KotlinVersion.KOTLIN_2_2)
+        languageVersion.set(KotlinVersion.KOTLIN_2_1)
 
         freeCompilerArgs.addAll(
             "-Xcontext-receivers",
             "-Xnon-local-break-continue",
-            "-Xconsistent-data-class-copy-visibility",
-            "-Xsuppress-warning=CONTEXT_RECEIVERS_DEPRECATED"
+            "-Xconsistent-data-class-copy-visibility"
         )
     }
 }
@@ -180,6 +208,7 @@ dependencies {
     implementation(projects.providers.piped)
     implementation(projects.providers.sponsorblock)
     implementation(projects.providers.translate)
+    implementation(projects.providers.ytmusic)
     implementation(projects.download)
     implementation(projects.core.data)
     implementation(projects.core.ui)

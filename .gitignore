@@ -14,3 +14,7 @@ local.properties
 /.github
 /.github
 .github/ISSUE_TEMPLATE/bug_report.yaml
+# Keystore y credenciales locales (no subir nunca)
+rmusic-release-key.keystore
+signing.env
+index.js

@@ -60,6 +60,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import com.rmusic.android.Database
+import com.rmusic.android.BuildConfig
 import com.rmusic.android.LocalPlayerServiceBinder
 import com.rmusic.android.R
 import com.rmusic.android.models.ui.toUiMedia
@@ -241,6 +242,10 @@ fun Player(
                     )
                 }
 
+                val providerSourceState = remember { mutableStateOf("") }
+                LaunchedEffect(binder) {
+                    binder?.streamProviderSource?.collect { providerSourceState.value = it }
+                }
                 Column(
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier
@@ -286,6 +291,14 @@ fun Player(
                                 }
                             }
                         }
+                    }
+                    if (BuildConfig.DEBUG && providerSourceState.value.isNotEmpty()) {
+                        BasicText(
+                            text = providerSourceState.value,
+                            style = typography.xxs.secondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 

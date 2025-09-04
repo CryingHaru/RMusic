@@ -58,8 +58,10 @@ object Piped {
             }
 
             install(HttpTimeout) {
-                connectTimeoutMillis = 1000L
-                requestTimeoutMillis = 5000L
+                // Increased timeouts to 30s to better handle slower networks / large playlist ops
+                connectTimeoutMillis = 30_000L
+                requestTimeoutMillis = 30_000L
+                socketTimeoutMillis = 30_000L
             }
 
             expectSuccess = true

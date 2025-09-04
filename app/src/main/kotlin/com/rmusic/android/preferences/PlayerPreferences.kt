@@ -56,6 +56,14 @@ object PlayerPreferences : GlobalPreferencesHolder() {
 
     var pauseCache by boolean(false)
 
+    // When true, playback won't fall back to legacy Innertube resolver; only authenticated
+    // YTMusic direct audio URLs will be used. If not logged in or no formats, playback errors.
+    // Default true to phase out unstable Innertube path per user request.
+    var disableInnertubeFallback by boolean(true)
+
+    // Si está habilitado, al terminar la cola se iniciarán recomendaciones automáticamente
+    var autoPlayRecommendations by boolean(true)
+
     val sponsorBlockEnabledProperty = boolean(false)
     var sponsorBlockEnabled by sponsorBlockEnabledProperty
 

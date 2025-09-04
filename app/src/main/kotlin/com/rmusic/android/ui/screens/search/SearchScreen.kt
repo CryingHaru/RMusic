@@ -30,7 +30,9 @@ import com.rmusic.core.ui.LocalAppearance
 fun SearchScreen(
     initialTextInput: String,
     onSearch: (String) -> Unit,
-    onViewPlaylist: (String) -> Unit
+    onViewPlaylist: (String) -> Unit,
+    onBack: (() -> Unit)? = null,
+    autoFocusSearchInput: Boolean = true
 ) {
     val saveableStateHolder = rememberSaveableStateHolder()
 
@@ -76,7 +78,7 @@ fun SearchScreen(
             Scaffold(
                 key = "search",
                 topIconButtonId = R.drawable.chevron_back,
-                onTopIconButtonClick = pop,
+                onTopIconButtonClick = onBack ?: pop,
                 tabIndex = tabIndex,
                 onTabChange = onTabChanged,
                 tabColumnContent = {
@@ -92,7 +94,7 @@ fun SearchScreen(
                             onSearch = onSearch,
                             onViewPlaylist = onViewPlaylist,
                             decorationBox = decorationBox,
-                            focused = child == null
+                            focused = autoFocusSearchInput && child == null
                         )
 
                         1 -> DownloadedSongSearch(

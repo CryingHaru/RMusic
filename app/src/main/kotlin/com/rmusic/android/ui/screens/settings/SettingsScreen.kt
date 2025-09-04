@@ -80,8 +80,9 @@ fun SettingsScreen() {
                     tab(2, R.string.downloads, R.drawable.download, canHide = false)
                     tab(3, R.string.database, R.drawable.server, canHide = false)
                     tab(4, R.string.sync, R.drawable.sync, canHide = false)
-                    tab(5, R.string.other, R.drawable.shapes, canHide = false)
-                    tab(6, R.string.about, R.drawable.information, canHide = false)
+                    tab(5, R.string.ytmusic_auth, R.drawable.person, canHide = false)
+                    tab(6, R.string.other, R.drawable.shapes, canHide = false)
+                    tab(7, R.string.about, R.drawable.information, canHide = false)
                 }
             ) { currentTabIndex ->
                 saveableStateHolder.SaveableStateProvider(currentTabIndex) {
@@ -91,8 +92,9 @@ fun SettingsScreen() {
                         2 -> DownloadSettings()
                         3 -> DatabaseSettings()
                         4 -> SyncSettings()
-                        5 -> OtherSettings()
-                        6 -> About()
+                        5 -> YTMusicAuthScreen()
+                        6 -> OtherSettings()
+                        7 -> About()
                     }
                 }
             }

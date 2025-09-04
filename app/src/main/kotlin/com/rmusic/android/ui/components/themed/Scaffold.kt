@@ -31,6 +31,7 @@ fun Scaffold(
     onTabChange: (Int) -> Unit,
     tabColumnContent: TabsBuilder.() -> Unit,
     modifier: Modifier = Modifier,
+    hideTopIcon: Boolean = false,
     tabsEditingTitle: String = stringResource(R.string.tabs),
     content: @Composable AnimatedVisibilityScope.(Int) -> Unit
 ) {
@@ -49,6 +50,7 @@ fun Scaffold(
             onTabIndexChange = onTabChange,
             hiddenTabs = hiddenTabs,
             setHiddenTabs = { hiddenTabs = it.toImmutableList() },
+            hideTopIcon = hideTopIcon,
             tabsEditingTitle = tabsEditingTitle,
             content = tabColumnContent
         )

@@ -26,6 +26,9 @@
     <string name="favorites">Favorites</string>
     <string name="offline">Offline</string>
     <string name="history">History</string>
+    <!-- Added for bottom navigation redesign -->
+    <string name="inicio">Inicio</string>
+    <string name="search">Buscar</string>
     <string name="overview">Overview</string>
     <string name="library">Library</string>
     <string name="discover">Discover</string>
@@ -325,6 +328,8 @@
     <string name="stop_when_closed_description">When you close the app, the music stops playing</string>
     <string name="pause_minimum_volume">Pause on minimum volume</string>
     <string name="pause_minimum_volume_description">Pause the player when you set your device volume to zero</string>
+    <string name="auto_play_recommendations">Auto-play recommendations</string>
+    <string name="auto_play_recommendations_description">Continue playback with recommended songs when the queue ends</string>
     <string name="audio">Audio</string>
     <string name="skip_silence">Skip silence</string>
     <string name="skip_silence_description">Skip silent parts during playback</string>
@@ -410,6 +415,8 @@
     <string name="skip_on_error_description">Skips the current song when there is an error</string>
     <string name="skip_on_error_notification">Skipped %s because of an error</string>
     <string name="skip_on_error_notification_unknown_song">Skipped the current song because of an error</string>
+    <string name="disable_innertube_fallback">Use only YouTube Music resolver</string>
+    <string name="disable_innertube_fallback_description">When enabled, playback will use only authenticated YouTube Music audio URLs and will not fall back to legacy Innertube (may fail if not logged in)</string>
     <string name="reverb_small_room">Small room</string>
     <string name="reverb_medium_room">Medium room</string>
     <string name="reverb_large_room">Large room</string>
@@ -462,4 +469,23 @@
     <string name="download_in_progress">Download in progress...</string>
     <string name="unknown_artist">Unknown Artist</string>
     <string name="preparing_downloads">Preparing downloads...</string>
+    
+    <!-- YouTube Music Authentication -->
+    <string name="ytmusic_auth">YouTube Music Auth</string>
+    <string name="ytmusic_authentication">YouTube Music Authentication</string>
+    <string name="ytmusic_auth_description">Authenticate with YouTube Music for full access</string>
+    <string name="start_authentication">Start Authentication</string>
+    <string name="re_authenticate">Re-authenticate</string>
+    <string name="logout">Logout</string>
+    <string name="authentication_status">Authentication Status</string>
+    <string name="not_authenticated">Not authenticated</string>
+    <string name="authenticated_as">Authenticated as: %1$s</string>
+    <string name="session_closed">Session closed</string>
+    <string name="authentication_successful">Authentication successful</string>
+    <string name="authentication_error">Authentication error: %1$s</string>
+    <string name="webview_error">WebView error: %1$s</string>
+    <string name="unexpected_error">Unexpected error: %1$s</string>
+    <string name="session_closed_successfully">Session closed successfully</string>
+    <string name="auth_instructions">Instructions</string>
+    <string name="auth_instructions_text">• Click on \'Start Authentication\'\n• YouTube Music will open in the internal browser\n• Sign in with your Google account\n• Once authenticated, the window will close automatically\n• Cookies will be saved for future sessions</string>
 </resources>

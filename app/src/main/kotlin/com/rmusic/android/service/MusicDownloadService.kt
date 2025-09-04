@@ -70,6 +70,7 @@ class MusicDownloadService : InvincibleService() {
     private val ongoingAlbumArtDownloads = mutableSetOf<String>()
     private val ongoingArtistArtDownloads = mutableSetOf<String>()
     private val stuckDownloadJobs = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+    private val retryCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     
     private val httpClient = HttpClient(OkHttp) {
         expectSuccess = false // Allow handling of non-success responses
@@ -187,6 +188,30 @@ class MusicDownloadService : InvincibleService() {
                         is DownloadState.Completed -> {
                         saveCompletedDownload(downloadItem)
                     }
+                        is DownloadState.Failed -> {
+                            // Rotate/refresh direct link on common transient/expiry errors
+                            val message = state.error.message?.lowercase() ?: ""
+                            val shouldRotate =
+                                ("403" in message) ||
+                                ("401" in message) ||
+                                ("416" in message) ||
+                                ("forbidden" in message) ||
+                                ("unauthorized" in message) ||
+                                ("partial content" in message) ||
+                                ("expired" in message) ||
+                                ("timeout" in message) ||
+                                ("reset" in message)
+
+                            val attempts = retryCounts.getOrDefault(downloadItem.id, 0)
+                            if (shouldRotate && attempts < 2) {
+                                retryCounts[downloadItem.id] = attempts + 1
+                                android.util.Log.w(TAG, "Download failed for ${downloadItem.title} (${state.error}). Rotating link and retrying (attempt ${attempts + 1}).")
+                                retryDownload(downloadItem)
+                            } else {
+                                // Exhausted retries or not a rotatable error; cleanup retry count
+                                retryCounts.remove(downloadItem.id)
+                            }
+                        }
                         // For any other state, we don't need a watchdog.
                         // The job is already removed at the start of the loop.
                         else -> {}

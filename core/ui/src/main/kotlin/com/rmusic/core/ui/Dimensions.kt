@@ -27,6 +27,9 @@ object Dimensions {
         val moodHeight = 64.dp
         val headerHeight = 140.dp
         val collapsedPlayerHeight = 64.dp
+    // Height reserved for the new bottom navigation bar (Inicio/Buscar/Biblioteca/Historial)
+    // Used to offset the collapsed player so it appears above the navigation bar.
+    val bottomNavigationHeight = 56.dp
 
         val verticalPadding = 8.dp
         val horizontalPadding = 8.dp

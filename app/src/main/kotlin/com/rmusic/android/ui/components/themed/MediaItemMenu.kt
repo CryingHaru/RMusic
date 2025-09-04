@@ -739,57 +739,68 @@ fun MediaItemMenu(
                         ?: return@MenuEntry
                     
                     scope.lifecycleScope.launch {
+                        suspend fun resolveUrlPreferYtMusic(videoId: String): String? {
+                            // Prefer YTMusic provider when available
+                            return runCatching {
+                                val yt = com.rmusic.providers.ytmusic.YTMusicProvider.shared()
+                                val best = yt.getBestAudioStream(videoId).getOrNull()
+                                best?.url ?: yt.getStreamUrl(videoId).getOrNull()
+                            }.getOrNull() ?: runCatching {
+                                // Fallback to Innertube
+                                Innertube.player(PlayerBody(videoId = videoId))?.getOrNull()?.streamingData?.adaptiveFormats
+                                    ?.filter { it.mimeType?.startsWith("audio/") == true }
+                                    ?.maxByOrNull { it.bitrate ?: 0 }
+                                    ?.url
+                            }.getOrNull()
+                        }
+
+                        suspend fun startDownloadWithUrl(url: String) {
+                            val extras = mediaItem.mediaMetadata.extras?.songBundle
+                            MusicDownloadService.download(
+                                context = context.applicationContext,
+                                trackId = mediaItem.mediaId,
+                                title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown",
+                                artist = mediaItem.mediaMetadata.artist?.toString(),
+                                album = mediaItem.mediaMetadata.albumTitle?.toString(),
+                                thumbnailUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
+                                duration = extras?.durationText?.let {
+                                    try {
+                                        val parts = it.split(":")
+                                        if (parts.size == 2) {
+                                            val minutes = parts[0].toLongOrNull() ?: 0
+                                            val seconds = parts[1].toLongOrNull() ?: 0
+                                            (minutes * 60 + seconds) * 1000
+                                        } else 0L
+                                    } catch (_: Exception) { 0L }
+                                },
+                                url = url
+                            )
+                            withContext(Dispatchers.Main) { context.toast("Download started") }
+                        }
+
                         try {
-                            // Resolve the streaming URL
                             val videoId = mediaItem.mediaId.removePrefix("https://youtube.com/watch?v=")
-                            val playerResponse = Innertube.player(
-                                PlayerBody(videoId = videoId)
-                            )?.getOrNull()
-                            
-                            val streamingUrl = playerResponse?.streamingData?.adaptiveFormats
-                                ?.filter { it.mimeType?.startsWith("audio/") == true }
-                                ?.maxByOrNull { it.bitrate ?: 0 }
-                                ?.url
-                            
-                            if (streamingUrl != null) {
-                                val extras = mediaItem.mediaMetadata.extras?.songBundle
-                                MusicDownloadService.download(
-                                    context = context.applicationContext,
-                                    trackId = mediaItem.mediaId,
-                                    title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown",
-                                    artist = mediaItem.mediaMetadata.artist?.toString(),
-                                    album = mediaItem.mediaMetadata.albumTitle?.toString(),
-                                    thumbnailUrl = mediaItem.mediaMetadata.artworkUri?.toString(),
-                                    duration = extras?.durationText?.let { 
-                                        // Try to parse duration from text (MM:SS format)
-                                        try {
-                                            val parts = it.split(":")
-                                            if (parts.size == 2) {
-                                                val minutes = parts[0].toLongOrNull() ?: 0
-                                                val seconds = parts[1].toLongOrNull() ?: 0
-                                                (minutes * 60 + seconds) * 1000
-                                            } else 0L
-                                        } catch (e: Exception) {
-                                            0L
-                                        }
-                                    },
-                                    url = streamingUrl
-                                )
-                                
-                                // Show toast to indicate download started
-                                withContext(Dispatchers.Main) {
-                                    context.toast("Download started")
-                                }
-                            } else {
-                                withContext(Dispatchers.Main) {
-                                    context.toast("Unable to get download URL")
-                                }
+                            val initialUrl = resolveUrlPreferYtMusic(videoId)
+                            if (initialUrl == null) {
+                                withContext(Dispatchers.Main) { context.toast("Unable to get download URL") }
+                                return@launch
+                            }
+                            try {
+                                startDownloadWithUrl(initialUrl)
+                            } catch (e: Exception) {
+                                val msg = e.message?.lowercase() ?: ""
+                                val shouldRotate = ("403" in msg) || ("401" in msg) || ("expired" in msg)
+                                if (shouldRotate) {
+                                    // Rotate link once
+                                    val rotated = resolveUrlPreferYtMusic(videoId)
+                                    if (rotated != null) {
+                                        startDownloadWithUrl(rotated)
+                                    } else throw e
+                                } else throw e
                             }
                         } catch (e: Exception) {
                             e.printStackTrace()
-                            withContext(Dispatchers.Main) {
-                                context.toast("Download failed: ${e.message}")
-                            }
+                            withContext(Dispatchers.Main) { context.toast("Download failed: ${e.message}") }
                         }
                     }
                 }

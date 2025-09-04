@@ -21,6 +21,7 @@ import com.rmusic.android.ui.screens.search.SearchScreen
 import com.rmusic.android.ui.screens.searchresult.SearchResultScreen
 import com.rmusic.android.ui.screens.settings.LogsScreen
 import com.rmusic.android.ui.screens.settings.SettingsScreen
+import com.rmusic.android.ui.screens.settings.YTMusicAuthScreen
 import com.rmusic.android.utils.toast
 import com.rmusic.compose.routing.Route0
 import com.rmusic.compose.routing.Route1
@@ -50,6 +51,7 @@ val moodRoute = Route1<Mood>("moodRoute")
 val searchResultRoute = Route1<String>("searchResultRoute")
 val searchRoute = Route1<String>("searchRoute")
 val settingsRoute = Route0("settingsRoute")
+val ytMusicAuthRoute = Route0("ytMusicAuthRoute")
 val downloadedAlbumRoute = Route1<String>("downloadedAlbumRoute")
 val downloadedArtistRoute = Route1<String>("downloadedArtistRoute")
 
@@ -100,6 +102,10 @@ fun RouteHandlerScope.GlobalRoutes() {
 
     settingsRoute {
         SettingsScreen()
+    }
+
+    ytMusicAuthRoute {
+        YTMusicAuthScreen()
     }
 
     searchRoute { initialTextInput ->

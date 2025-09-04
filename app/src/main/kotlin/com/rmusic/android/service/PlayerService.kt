@@ -32,7 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat.startForegroundService
+// import removed: startForegroundService not needed when already inside the service
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
@@ -101,6 +101,7 @@ import com.rmusic.android.utils.activityPendingIntent
 import com.rmusic.android.utils.asDataSource
 import com.rmusic.android.utils.broadcastPendingIntent
 import com.rmusic.android.utils.defaultDataSource
+import com.rmusic.android.utils.youtubeDataSource
 import com.rmusic.android.utils.findCause
 import com.rmusic.android.utils.findNextMediaItemById
 import com.rmusic.android.utils.forcePlayFromBeginning
@@ -142,6 +143,7 @@ import com.rmusic.providers.sponsorblock.SponsorBlock
 import com.rmusic.providers.sponsorblock.models.Action
 import com.rmusic.providers.sponsorblock.models.Category
 import com.rmusic.providers.sponsorblock.requests.segments
+import com.rmusic.providers.ytmusic.YTMusicProvider
 import io.ktor.client.plugins.ClientRequestException
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -316,6 +318,10 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     private var lastDetailedError: String? = null
 
     private val binder = Binder()
+
+    // Track last stream provider for debug UI ("Innertube" or "YTMusic")
+    private val lastProviderSource = MutableStateFlow("YTMusic")
+    private val ytMusicProvider by lazy { YTMusicProvider.shared() }
 
     private var isNotificationStarted = false
     override val notificationId get() = ServiceNotifications.default.notificationId!!
@@ -515,7 +521,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
     }
 
-    override fun onTaskRemoved(rootIntent: Intent?) {
+      override fun onTaskRemoved(rootIntent: Intent?) {
         if (!player.shouldBePlaying || PlayerPreferences.stopWhenClosed)
             broadcastPendingIntent<NotificationDismissReceiver>().send()
         super.onTaskRemoved(rootIntent)
@@ -564,6 +570,15 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
 
         super.onConfigurationChanged(newConfig)
+    }
+
+    // Asegurar que el servicio se mantenga vivo en segundo plano si el sistema lo mata
+    // y que se reinicie automáticamente cuando sea posible.
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // No necesitamos hacer nada especial aquí porque la notificación de foreground
+        // se gestiona en onEvents(). Devolvemos START_STICKY para indicar al sistema que
+        // reintente recrear el servicio cuando haya recursos.
+        return START_STICKY
     }
 
     override fun onPlaybackStatsReady(
@@ -690,7 +705,9 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             append("stackTrace=${error.stackTraceToString().take(200)}")
         }
         
-        // Log completo del error
+    // Guardar para UI de depuración
+    lastDetailedError = detailedError
+    // Log completo del error
         Log.e(TAG, "PlaybackError (attempt ${attempts + 1}/$maxRetries): $detailedError", error)
         
         // Mostrar error raw en debug
@@ -1116,11 +1133,45 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     }
 
     private fun maybeProcessRadio() {
+        // No hacer nada si hay suficientes items por delante
         if (player.mediaItemCount - player.currentMediaItemIndex > 3) return
+
+        // Respetar modos de repetición: no iniciar radio si hay loop de pista o cola
+        if (player.repeatMode != Player.REPEAT_MODE_OFF) return
+
+        // Si no hay radio activa y el ajuste está encendido, intenta iniciarla a partir del tema actual
+        if (radio == null && PlayerPreferences.autoPlayRecommendations) {
+            val current = player.currentMediaItem
+            val currentId = current?.mediaId?.takeIf { it.isNotBlank() }
+            // Evitar iniciar radio para locales/descargados
+            val isLocalOrDownloaded = currentId?.startsWith(LOCAL_KEY_PREFIX) == true || currentId?.startsWith("download:") == true
+
+            if (currentId != null && !isLocalOrDownloaded) {
+                // Construir endpoint Watch mínimo usando el videoId
+                val endpoint = NavigationEndpoint.Endpoint.Watch(
+                    videoId = currentId,
+                    playlistId = null,
+                    params = null,
+                    playlistSetVideoId = null
+                )
+                // Iniciar radio agregando por detrás
+                binder.setupRadio(endpoint)
+            }
+        }
 
         radio?.let { radio ->
             coroutineScope.launch(Dispatchers.Main) {
-                player.addMediaItems(radio.process())
+                val newItems = radio.process()
+                if (newItems.isNotEmpty()) {
+                    player.addMediaItems(newItems)
+
+                    // Si la reproducción terminó por falta de elementos, avanza y reanuda
+                    if (player.playbackState == Player.STATE_ENDED) {
+                        // Intentar pasar al siguiente (recién agregado) y reproducir
+                        runCatching { player.seekToNextMediaItem() }
+                        player.play()
+                    }
+                }
             }
         }
     }
@@ -1179,7 +1230,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                     player.prepare()
 
                     isNotificationStarted = true
-                    startForegroundService(this@PlayerService, intent<PlayerService>())
+                    // Service is already running; directly enter foreground with notification
                     startForeground()
                 }
             }
@@ -1451,17 +1502,35 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                                 return@launch
                             }
                             
-                            // Get streaming URL for download
-                            showDebugNotification("Getting URL for: $title")
-                            val playerResponse = runCatching {
-                                Innertube.player(PlayerBody(videoId = mediaId))
-                            }.getOrNull()
-                            
-                            val streamingUrl = playerResponse?.mapCatching { body ->
-                                body?.streamingData?.adaptiveFormats?.findLast { format ->
-                                    format.itag == 251 || format.itag == 140
-                                }?.url
-                            }?.getOrNull()
+                            // Get streaming URL for download (prefer YTMusic provider when logged in)
+                            showDebugNotification("Resolviendo URL: $title")
+                            var streamingUrl: String? = null
+                            try {
+                                val ytProvider = YTMusicProvider.shared()
+                                val best = ytProvider.getBestAudioStream(mediaId).getOrNull()
+                                streamingUrl = best?.url
+                                if (streamingUrl != null) {
+                                    lastProviderSource.value = "YTMusic"
+                                    showDebugNotification("URL vía YTMusic")
+                                }
+                            } catch (ignored: Exception) {
+                                // Ignore and fallback
+                            }
+
+                            if (streamingUrl == null) {
+                                val playerResponse = runCatching {
+                                    Innertube.player(PlayerBody(videoId = mediaId))
+                                }.getOrNull()
+                                streamingUrl = playerResponse?.mapCatching { body ->
+                                    body?.streamingData?.adaptiveFormats?.findLast { format ->
+                                        format.itag == 251 || format.itag == 140
+                                    }?.url
+                                }?.getOrNull()
+                                if (streamingUrl != null) {
+                                    lastProviderSource.value = "Innertube"
+                                    showDebugNotification("URL vía Innertube (fallback)")
+                                }
+                            }
                             
                             if (streamingUrl != null) {
                                 val metadata = currentMediaItem.mediaMetadata
@@ -1644,7 +1713,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
         updatePlaybackState()
 
-        if (
+    if (
             !events.containsAny(
                 Player.EVENT_PLAYBACK_STATE_CHANGED,
                 Player.EVENT_PLAY_WHEN_READY_CHANGED,
@@ -1668,7 +1737,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
         if (player.shouldBePlaying && !isNotificationStarted) {
             isNotificationStarted = true
-            startForegroundService(this@PlayerService, intent<PlayerService>())
+            // Avoid starting a new foreground service from background; just promote to foreground
             startForeground()
             makeInvincible(false)
             openEqualizer()
@@ -1680,6 +1749,11 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                 closeEqualizer()
             }
             updateNotification()
+        }
+
+        // Si el estado cambió a ENDED, intentar procesar radio para continuar la reproducción
+        if (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) && player.playbackState == Player.STATE_ENDED) {
+            maybeProcessRadio()
         }
     }
 
@@ -1771,7 +1845,8 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                 }
             },
             context = applicationContext,
-            cache = cache
+            cache = cache,
+            onProviderUsed = { source -> lastProviderSource.value = source }
         ),
         /* extractorsFactory = */ DefaultExtractorsFactory()
     ).setLoadErrorHandlingPolicy(
@@ -1819,6 +1894,9 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     inner class Binder : AndroidBinder() {
         val player: ExoPlayer
             get() = this@PlayerService.player
+
+        val streamProviderSource: StateFlow<String>
+            get() = this@PlayerService.lastProviderSource
 
         val cache: Cache
             get() = this@PlayerService.cache
@@ -2025,7 +2103,8 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
     companion object {
         private const val DEFAULT_CACHE_DIRECTORY = "exoplayer"
-        private const val DEFAULT_CHUNK_LENGTH = 512 * 1024L
+    // Tamaño de segmento inspirado en index.js (~9.9MB) para reducir conexiones y latencia de seeks
+    private const val DEFAULT_CHUNK_LENGTH = 9_898_989L
 
         fun createDatabaseProvider(context: Context) = StandaloneDatabaseProvider(context)
         fun createCache(
@@ -2051,30 +2130,99 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             cache: Cache,
             chunkLength: Long? = DEFAULT_CHUNK_LENGTH,
             findMediaItem: suspend (videoId: String) -> MediaItem? = { null },
-            uriCache: UriCache<String, Long?> = UriCache()
+            uriCache: UriCache<String, Long?> = UriCache(),
+            onProviderUsed: (String) -> Unit = {}
         ): DataSource.Factory = ResolvingDataSource.Factory(
             ConditionalCacheDataSourceFactory(
                 cacheDataSourceFactory = cache.readOnlyWhen { PlayerPreferences.pauseCache }.asDataSource,
-                upstreamDataSourceFactory = context.defaultDataSource,
+                upstreamDataSourceFactory = context.youtubeDataSource,
                 shouldCache = { !it.isLocal }
             )
         ) resolver@{ dataSpec ->
-            val mediaId = dataSpec.key?.removePrefix("https://youtube.com/watch?v=")
-                ?: error("A key must be set")
+            // Log entrada del resolver para diagnosticar SOURCE_ERROR
+            runCatching {
+                Log.d(TAG, "Resolver:start uri=${'$'}{dataSpec.uri} key=${'$'}{dataSpec.key} pos=${'$'}{dataSpec.position} len=${'$'}{dataSpec.length}")
+            }
 
-            fun DataSpec.ranged(contentLength: Long?) = contentLength?.let {
-                if (chunkLength == null) return@let null
+            // Asegurar que siempre tengamos una key utilizable; intentar derivarla del URI si falta
+            val rawKey = dataSpec.key ?: dataSpec.uri?.toString()
+            val mediaId = rawKey?.removePrefix("https://youtube.com/watch?v=")
+                ?: run {
+                    Log.e(TAG, "Resolver:error missing key and uri; cannot resolve stream")
+                    throw PlaybackException(
+                        /* message = */ "Missing cache key for resolver",
+                        /* cause = */ null,
+                        /* errorCode = */ PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+                    )
+                }
 
-                val start = dataSpec.uriPositionOffset
-                val length = (contentLength - start).coerceAtMost(chunkLength)
-                val rangeText = "$start-${start + length}"
+            Log.d(TAG, "Resolver:mediaId=${'$'}mediaId")
 
-                this.subrange(start, length)
-                    .withAdditionalHeaders(mapOf("Range" to "bytes=$rangeText"))
-            } ?: this
+            // Cache simple para rangos de YouTube por mediaId
+            val rangeCache = mutableMapOf<String, Pair<Pair<Long, Long>?, Pair<Long, Long>?>>()
+
+            // Usar rangos específicos de YouTube para calcular correctamente la primera petición (init+index)
+            // y luego mantener una sola conexión abierta para el resto del stream (bytes=dataStart-)
+            fun DataSpec.withYouTubeRange(
+                initRange: Pair<Long, Long>?,
+                indexRange: Pair<Long, Long>?,
+                totalLength: Long?,
+                useSegmentation: Boolean
+            ): DataSpec {
+                // Usar la posición solicitada por ExoPlayer para alinear segmentos y seeks
+                val start = dataSpec.position
+
+                // Guardar rangos en cache para reutilizar
+                if (initRange != null && indexRange != null) {
+                    rangeCache[mediaId] = initRange to indexRange
+                }
+
+                // Recuperar rangos del cache si no se proporcionan
+                val (cachedInit, cachedIndex) = rangeCache[mediaId] ?: (null to null)
+                val effectiveInit = initRange ?: cachedInit
+                val effectiveIndex = indexRange ?: cachedIndex
+
+                // Si hay rangos, calcular el inicio real de datos
+                val dataStart = effectiveIndex?.second?.plus(1)
+
+                // Caso inicial: no limitarse solo a metadatos, incluir datos de audio
+                if (start == 0L) {
+                    return if (useSegmentation && chunkLength != null) {
+                        // Descargar desde 0 un primer segmento suficientemente grande (incluye init/index)
+                        this.subrange(0, chunkLength)
+                    } else {
+                        // Sin segmentación: permitir flujo completo desde el inicio
+                        this.subrange(0, C.LENGTH_UNSET.toLong())
+                    }
+                }
+
+                // Si pedimos antes de dataStart, saltar directo a dataStart
+                if (dataStart != null && start < dataStart) {
+                    return if (useSegmentation && chunkLength != null) {
+                        val segStart = dataStart
+                        val length = chunkLength
+                        this.subrange(segStart, length)
+                    } else this.subrange(dataStart, C.LENGTH_UNSET.toLong())
+                }
+
+                // Resto de casos: alineación por segmentos si aplica
+                return if (useSegmentation && chunkLength != null) {
+                    val segStart = if (dataStart != null) {
+                        // Alinear al segmento pero sin ir por debajo de dataStart
+                        val aligned = (start / chunkLength) * chunkLength
+                        maxOf(aligned, dataStart)
+                    } else {
+                        (start / chunkLength) * chunkLength
+                    }
+                    val remaining = totalLength?.let { it - segStart } ?: C.LENGTH_UNSET.toLong()
+                    val length = if (remaining == C.LENGTH_UNSET.toLong()) chunkLength else minOf(chunkLength, remaining)
+                    this.subrange(segStart, length)
+                } else this.subrange(start, C.LENGTH_UNSET.toLong())
+            }
 
             // Handle local files (cached and downloaded)
             if (dataSpec.isLocal) {
+                Log.d(TAG, "Resolver:local content -> passthrough")
                 return@resolver dataSpec
             }
 
@@ -2085,10 +2233,12 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                 }
                 
                 if (downloadedSong != null && File(downloadedSong.filePath).exists()) {
+                    Log.d(TAG, "Resolver:download hit -> ${'$'}{downloadedSong.filePath}")
                     return@resolver dataSpec
                         .withUri(File(downloadedSong.filePath).toUri())
                 } else {
                     // Downloaded song not found or file doesn't exist
+                    Log.w(TAG, "Resolver:download miss or file missing for ${'$'}mediaId")
                     throw PlayableFormatNotFoundException()
                 }
             }
@@ -2099,92 +2249,91 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                     /* position = */ dataSpec.position,
                     /* length = */ chunkLength
                 )
-            ) dataSpec
+            ) {
+                Log.d(TAG, "Resolver:cache hit at pos=${'$'}{dataSpec.position}, len=${'$'}chunkLength")
+                dataSpec
+            }
             else uriCache[mediaId]?.let { cachedUri ->
+                // Reutilizar URI cacheada sin headers adicionales; dejar que el servidor negocie como en index.js
+                Log.d(TAG, "Resolver:uriCache hit -> ${'$'}{cachedUri.uri}")
                 dataSpec
                     .withUri(cachedUri.uri)
-                    .ranged(cachedUri.meta)
+                    .withYouTubeRange(null, null, cachedUri.meta, /* useSegmentation = */ true)
             } ?: run {
-                val body = runBlocking(Dispatchers.IO) {
-                    Innertube.player(PlayerBody(videoId = mediaId))
-                }?.getOrThrow()
+                // Priorizar YTMusic como proveedor primario (sin requerir login)
+                run {
+                    val ytProvider = YTMusicProvider.shared()
+                    Log.d(TAG, "Resolver:YTMusic.getBestAudioStream(${ '$' }mediaId) ...")
+                    val best = runBlocking(Dispatchers.IO) { ytProvider.getBestAudioStream(mediaId).getOrNull() }
+                    var directUrl = best?.url
+                    // Fallback: intentar obtener una URL directa simple
+                    if (directUrl == null) {
+                        Log.d(TAG, "Resolver:YTMusic.getStreamUrl(${ '$' }mediaId) ...")
+                        val fetchedUrl = runBlocking(Dispatchers.IO) { ytProvider.getStreamUrl(mediaId).getOrNull() }
+                        if (BuildConfig.DEBUG) {
+                            val preview = fetchedUrl?.let { if (it.length > 120) it.substring(0, 120) + "…" else it }
+                            Log.d(TAG, "YTMusic.getStreamUrl($mediaId) -> ${preview ?: "null"}")
+                        }
+                        directUrl = fetchedUrl
+                    }
+                    if (directUrl != null) {
+                        Log.d(TAG, "Resolver:YTMusic resolved -> ${'$'}directUrl")
+                        onProviderUsed("YTMusic")
 
-                if (body?.videoDetails?.videoId != mediaId) throw VideoIdMismatchException()
+                        // Determinar Content-Length y soporte de rangos
+                        val contentLen = runBlocking(Dispatchers.IO) { ytProvider.headContentLength(directUrl!!).getOrNull() }
+                        val supportsRanges = contentLen?.let { len ->
+                            runBlocking(Dispatchers.IO) { ytProvider.supportsByteRanges(directUrl!!, len).getOrDefault(false) }
+                        } ?: true // asumir true si no se pudo determinar
 
-                body.reason?.let { Log.w(TAG, it) }
-                val format = body.streamingData?.highestQualityFormat
-                    ?: throw PlayableFormatNotFoundException()
-                val url = when (val status = body.playabilityStatus?.status) {
-                    "OK" -> {
-                        val mediaItem = runCatching {
-                            runBlocking(Dispatchers.IO) { findMediaItem(mediaId) }
-                        }.getOrNull()
-                        val extras = mediaItem?.mediaMetadata?.extras?.songBundle
-
-                        if (extras?.durationText == null) format.approxDurationMs
-                            ?.div(1000)
-                            ?.let(DateUtils::formatElapsedTime)
-                            ?.removePrefix("0")
-                            ?.let { durationText ->
-                                extras?.durationText = durationText
-                                Database.updateDurationText(mediaId, durationText)
-                            }
-
-                        transaction {
-                            runCatching {
-                                mediaItem?.let(Database::insert)
+                        // Persistir información básica del formato si está disponible
+                        runCatching {
+                            if (best != null) transaction {
+                                // Asegurar que exista la fila Song antes de insertar Format (FK songId -> Song.id)
+                                runCatching {
+                                    val item = runBlocking(Dispatchers.IO) { findMediaItem(mediaId) }
+                                    if (item != null) Database.insert(item)
+                                    else Database.insert(
+                                        com.rmusic.android.models.Song(
+                                            id = mediaId,
+                                            title = mediaId,
+                                            durationText = null,
+                                            thumbnailUrl = null
+                                        )
+                                    )
+                                }
 
                                 Database.insert(
                                     Format(
                                         songId = mediaId,
-                                        itag = format.itag,
-                                        mimeType = format.mimeType,
-                                        bitrate = format.bitrate,
-                                        loudnessDb = body.playerConfig?.audioConfig?.normalizedLoudnessDb,
-                                        contentLength = format.contentLength,
-                                        lastModified = format.lastModified
+                                        itag = best.itag,
+                                        mimeType = best.mimeType,
+                                        bitrate = best.bitrate?.toLong(),
+                                        contentLength = contentLen,
+                                        lastModified = null,
+                                        loudnessDb = best.loudnessDb,
+                                        url = directUrl
                                     )
                                 )
                             }
                         }
 
-                        runCatching {
-                            runBlocking(Dispatchers.IO) {
-                                body.context?.let { format.findUrl(it) }
-                            }
-                        }.getOrElse {
-                            throw RestrictedVideoException(it)
-                        }
+                        val uri = directUrl.toUri()
+                        // Guardar content-length si está disponible
+                        uriCache.push(key = mediaId, meta = contentLen, uri = uri, validUntil = null)
+                        // No añadir headers especiales; seguir estrategia simple tipo fetch() de index.js
+                        val resolved = dataSpec.withUri(uri)
+                            .withYouTubeRange(best?.initRange, best?.indexRange, contentLen, /* useSegmentation = */ supportsRanges)
+                        Log.d(TAG, "Resolver:return resolved with ranges=${'$'}{best?.initRange}/${'$'}{best?.indexRange} supportsRanges=${'$'}supportsRanges len=${'$'}contentLen")
+                        return@resolver resolved
                     }
-
-                    "UNPLAYABLE" -> throw UnplayableException()
-                    "LOGIN_REQUIRED" -> throw LoginRequiredException()
-
-                    else -> throw PlaybackException(
-                        /* message = */ status,
-                        /* cause = */ null,
-                        /* errorCode = */ PlaybackException.ERROR_CODE_REMOTE_ERROR
-                    )
-                } ?: throw UnplayableException()
-
-                val uri = url.toUri().let {
-                    if (body.cpn == null) it
-                    else it
-                        .buildUpon()
-                        .appendQueryParameter("cpn", body.cpn)
-                        .build()
                 }
-
-                uriCache.push(
-                    key = mediaId,
-                    meta = format.contentLength,
-                    uri = uri,
-                    validUntil = body.streamingData?.expiresInSeconds?.seconds?.let { Clock.System.now() + it }
-                )
-
-                dataSpec.withUri(uri).ranged(format.contentLength)
+                // Sin fallback a Innertube: seguir la implementación de index.js (solo iOS)
+                Log.e(TAG, "Resolver:PlayableFormatNotFound for ${'$'}mediaId")
+                throw PlayableFormatNotFoundException()
             }
         }.handleUnknownErrors {
+            Log.w(TAG, "Resolver:unknown error -> clearing uriCache")
             uriCache.clear()
         }.retryIf<UnplayableException>(
             maxRetries = 2,

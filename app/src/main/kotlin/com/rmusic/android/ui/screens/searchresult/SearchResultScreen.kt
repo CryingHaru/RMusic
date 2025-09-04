@@ -5,7 +5,20 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
@@ -44,6 +57,9 @@ import com.rmusic.providers.innertube.models.bodies.ContinuationBody
 import com.rmusic.providers.innertube.models.bodies.SearchBody
 import com.rmusic.providers.innertube.requests.searchPage
 import com.rmusic.providers.innertube.utils.from
+import com.rmusic.providers.ytmusic.YTMusicProvider
+import com.rmusic.providers.innertube.models.NavigationEndpoint
+import com.rmusic.android.utils.asMediaItem
 
 @OptIn(ExperimentalFoundationApi::class)
 @Route
@@ -54,6 +70,16 @@ fun SearchResultScreen(query: String, onSearchAgain: () -> Unit) {
     val menuState = LocalMenuState.current
 
     val saveableStateHolder = rememberSaveableStateHolder()
+    var ytSearchResult by remember(query) { mutableStateOf<com.rmusic.providers.ytmusic.pages.SearchResult?>(null) }
+    var ytTried by remember(query) { mutableStateOf(false) }
+    LaunchedEffect(query) {
+        val provider = YTMusicProvider.shared()
+        if (provider.isLoggedIn()) {
+            runCatching { provider.search(query).getOrNull() }
+                .onSuccess { ytSearchResult = it }
+        }
+        ytTried = true
+    }
 
     PersistMapCleanup(prefix = "searchResults/$query/")
 
@@ -90,8 +116,56 @@ fun SearchResultScreen(query: String, onSearchAgain: () -> Unit) {
                 }
             ) { tabIndex ->
                 saveableStateHolder.SaveableStateProvider(tabIndex) {
+                    val ytSearch = ytSearchResult
                     when (tabIndex) {
-                        0 -> ItemsPage(
+                        0 -> if (ytSearch != null && ytSearch.songs.isNotEmpty()) {
+                            // Custom list for YTMusic songs
+                            val lazyListState = rememberLazyListState()
+                            val (currentMediaId2, playing2) = playingSong(binder)
+                            Box {
+                                LazyColumn(
+                                    state = lazyListState,
+                                    contentPadding = com.rmusic.android.LocalPlayerAwareWindowInsets.current
+                                        .only(WindowInsetsSides.Vertical + WindowInsetsSides.End)
+                                        .asPaddingValues(),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    item(key = "header") { headerContent(null) }
+                                    itemsIndexed(ytSearch.songs) { index, s ->
+                                        val mediaItem = s.asMediaItem
+                                        SongItem(
+                                            song = mediaItem,
+                                            thumbnailSize = Dimensions.thumbnails.song,
+                                            modifier = Modifier.combinedClickable(
+                                                onLongClick = {
+                                                    menuState.display {
+                                                        NonQueuedMediaItemMenu(
+                                                            onDismiss = menuState::hide,
+                                                            mediaItem = mediaItem
+                                                        )
+                                                    }
+                                                },
+                                                onClick = {
+                                                    binder?.stopRadio()
+                                                    val list = ytSearch.songs.map { it.asMediaItem }
+                                                    binder?.player?.forcePlay(mediaItem)
+                                                    // Iniciar radio para reproducir recomendaciones automáticamente
+                                                    binder?.setupRadio(
+                                                        com.rmusic.providers.innertube.models.NavigationEndpoint.Endpoint.Watch(
+                                                            videoId = mediaItem.mediaId,
+                                                            playlistId = null,
+                                                            params = null,
+                                                            playlistSetVideoId = null
+                                                        )
+                                                    )
+                                                }
+                                            ),
+                                            isPlaying = playing2 && currentMediaId2 == mediaItem.mediaId
+                                        )
+                                    }
+                                }
+                            }
+                        } else ItemsPage(
                             tag = "searchResults/$query/songs",
                             provider = { continuation ->
                                 if (continuation == null) Innertube.searchPage(
@@ -123,7 +197,15 @@ fun SearchResultScreen(query: String, onSearchAgain: () -> Unit) {
                                         onClick = {
                                             binder?.stopRadio()
                                             binder?.player?.forcePlay(song.asMediaItem)
-                                            binder?.setupRadio(song.info?.endpoint)
+                                            // Iniciar radio para reproducir recomendaciones automáticamente
+                                            binder?.setupRadio(
+                                                com.rmusic.providers.innertube.models.NavigationEndpoint.Endpoint.Watch(
+                                                    videoId = song.asMediaItem.mediaId,
+                                                    playlistId = null,
+                                                    params = null,
+                                                    playlistSetVideoId = null
+                                                )
+                                            )
                                         }
                                     ),
                                     isPlaying = playing && currentMediaId == song.key
@@ -232,7 +314,15 @@ fun SearchResultScreen(query: String, onSearchAgain: () -> Unit) {
                                         onClick = {
                                             binder?.stopRadio()
                                             binder?.player?.forcePlay(video.asMediaItem)
-                                            binder?.setupRadio(video.info?.endpoint)
+                                            // Iniciar radio desde el video cuando sea posible
+                                            binder?.setupRadio(
+                                                video.info?.endpoint ?: NavigationEndpoint.Endpoint.Watch(
+                                                    videoId = video.asMediaItem.mediaId,
+                                                    playlistId = null,
+                                                    params = null,
+                                                    playlistSetVideoId = null
+                                                )
+                                            )
                                         }
                                     )
                                 )
@@ -245,7 +335,32 @@ fun SearchResultScreen(query: String, onSearchAgain: () -> Unit) {
                             }
                         )
 
-                        4 -> ItemsPage(
+                        4 -> if (ytSearch != null && ytSearch.playlists.isNotEmpty()) {
+                            val lazyListState = rememberLazyListState()
+                            Box {
+                                LazyColumn(
+                                    state = lazyListState,
+                                    contentPadding = com.rmusic.android.LocalPlayerAwareWindowInsets.current
+                                        .only(WindowInsetsSides.Vertical + WindowInsetsSides.End)
+                                        .asPaddingValues(),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    item(key = "header") { headerContent(null) }
+                                    itemsIndexed(ytSearch.playlists) { index, p ->
+                                        PlaylistItem(
+                                            thumbnailUrl = p.thumbnails.firstOrNull()?.url,
+                                            songCount = p.songCount,
+                                            name = p.title,
+                                            channelName = p.author,
+                                            thumbnailSize = Dimensions.thumbnails.playlist,
+                                            modifier = Modifier.clickable {
+                                                playlistRoute(p.browseId, null, null, false)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        } else ItemsPage(
                             tag = "searchResults/$query/playlists",
                             provider = { continuation ->
                                 if (continuation == null) Innertube.searchPage(

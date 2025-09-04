@@ -188,6 +188,7 @@ inline fun NavigationRail(
     hiddenTabs: ImmutableList<String>,
     crossinline setHiddenTabs: (List<String>) -> Unit,
     modifier: Modifier = Modifier,
+    hideTopIcon: Boolean = false,
     tabsEditingTitle: String = stringResource(R.string.tabs),
     crossinline content: TabsBuilder.() -> Unit
 ) {
@@ -249,20 +250,22 @@ inline fun NavigationRail(
                     height = Dimensions.items.headerHeight
                 )
         ) {
-            Image(
-                painter = painterResource(topIconButtonId),
-                contentDescription = null,
-                colorFilter = ColorFilter.tint(colorPalette.textSecondary),
-                modifier = Modifier
-                    .offset(
-                        x = if (isLandscape) 0.dp else Dimensions.navigationRail.iconOffset,
-                        y = 48.dp
-                    )
-                    .clip(CircleShape)
-                    .clickable(onClick = onTopIconButtonClick)
-                    .padding(all = 12.dp)
-                    .size(22.dp)
-            )
+            if (!hideTopIcon) {
+                Image(
+                    painter = painterResource(topIconButtonId),
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(colorPalette.textSecondary),
+                    modifier = Modifier
+                        .offset(
+                            x = if (isLandscape) 0.dp else Dimensions.navigationRail.iconOffset,
+                            y = 48.dp
+                        )
+                        .clip(CircleShape)
+                        .clickable(onClick = onTopIconButtonClick)
+                        .padding(all = 12.dp)
+                        .size(22.dp)
+                )
+            }
         }
 
         Column(

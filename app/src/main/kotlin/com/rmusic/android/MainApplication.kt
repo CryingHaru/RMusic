@@ -85,6 +85,7 @@ import com.rmusic.android.utils.DisposableListener
 import com.rmusic.android.utils.KeyedCrossfade
 import com.rmusic.android.utils.LocalMonetCompat
 import com.rmusic.android.utils.asMediaItem
+import com.rmusic.providers.ytmusic.pages.SongResult as YTSongResult
 import com.rmusic.android.utils.collectProvidedBitmapAsState
 import com.rmusic.android.utils.forcePlay
 import com.rmusic.android.utils.intent
@@ -112,6 +113,8 @@ import com.rmusic.core.ui.utils.songBundle
 import com.rmusic.providers.innertube.Innertube
 import com.rmusic.providers.innertube.models.bodies.BrowseBody
 import com.rmusic.providers.innertube.requests.playlistPage
+import com.rmusic.providers.ytmusic.YTMusicProvider
+import com.rmusic.android.utils.asMediaItem
 import com.rmusic.providers.innertube.requests.song
 import coil3.ImageLoader
 import coil3.PlatformContext
@@ -167,7 +170,10 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
 
     override fun onStart() {
         super.onStart()
-        bindService(intent<PlayerService>(), serviceConnection, BIND_AUTO_CREATE)
+    // Ensure the playback service is a started service so it survives unbind when app goes background
+    // Starting it while activity is in foreground avoids background start restrictions
+    startService(intent<PlayerService>())
+    bindService(intent<PlayerService>(), serviceConnection, BIND_AUTO_CREATE)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -259,6 +265,8 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
             val playerBottomSheetState = rememberBottomSheetState(
                 key = vm.binder,
                 dismissedBound = 0.dp,
+                // Add bottom navigation height so the collapsed mini player appears above the nav bar.
+                // Collapsed only reserves the mini player height (navigation bar draws above via zIndex)
                 collapsedBound = Dimensions.items.collapsedPlayerHeight + bottomDp,
                 expandedBound = maxHeight
             )
@@ -493,12 +501,19 @@ fun handleUrl(
                     }
                     null
                 }
-            }?.let { videoId ->
-                Innertube.song(videoId)?.getOrNull()?.let { song ->
-                    withContext(Dispatchers.Main) {
-                        binder?.player?.forcePlay(song.asMediaItem)
-                    }
-                }
+                    }?.let { videoId ->
+                        // Prefer YTMusic provider first
+                        val ytProvider = YTMusicProvider.shared()
+                        val ytSong = ytProvider.getPlayer(videoId).getOrNull()
+                        if (ytSong != null) withContext(Dispatchers.Main) {
+                            binder?.player?.let { p -> p.forcePlay((ytSong as YTSongResult).asMediaItem) }
+                        } else {
+                            Innertube.song(videoId)?.getOrNull()?.let { song ->
+                                withContext(Dispatchers.Main) {
+                                    binder?.player?.let { p -> p.forcePlay(song.asMediaItem) }
+                                }
+                            }
+                        }
             }
         }
     }
@@ -510,7 +525,62 @@ val LocalPlayerAwareWindowInsets =
 val LocalCredentialManager = staticCompositionLocalOf { Dependencies.credentialManager }
 
 class MainApplication : Application(), SingletonImageLoader.Factory, Configuration.Provider {
+    private fun installCrashLogger() {
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching {
+                val ts = java.time.ZonedDateTime.now().toString()
+                val sb = StringBuilder()
+                    .appendLine("===== CRASH @ $ts =====")
+                    .appendLine("Thread: ${thread.name} (${thread.id})")
+                    .appendLine("App: ${BuildConfig.APPLICATION_ID} ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                    .appendLine("Android: ${android.os.Build.VERSION.SDK_INT} (${android.os.Build.VERSION.RELEASE})")
+                    .appendLine("Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+                    .appendLine()
+                val sw = java.io.StringWriter()
+                val pw = java.io.PrintWriter(sw)
+                throwable.printStackTrace(pw)
+                pw.flush()
+                sb.appendLine(sw.toString())
+
+                // Preferred location: main external storage root (scoped by MANAGE_EXTERNAL_STORAGE on Android 11+)
+                val candidatePaths = buildList<java.io.File> {
+                    val externalRoot = try {
+                        android.os.Environment.getExternalStorageDirectory()
+                    } catch (_: Throwable) { null }
+                    if (externalRoot != null) add(java.io.File(externalRoot, "crash.log"))
+
+                    // App-specific external dir
+                    getExternalFilesDir(null)?.let { add(java.io.File(it.parentFile?.parentFile ?: it, "crash.log")) }
+                    getExternalFilesDir(null)?.let { add(java.io.File(it, "crash.log")) }
+
+                    // Internal files dir as last resort
+                    filesDir?.let { add(java.io.File(it, "crash.log")) }
+                }
+
+                var wrote = false
+                for (target in candidatePaths) {
+                    wrote = runCatching {
+                        target.parentFile?.mkdirs()
+                        java.io.FileOutputStream(target, /* append = */ true).use { fos ->
+                            fos.write(sb.toString().toByteArray())
+                            fos.flush()
+                        }
+                        true
+                    }.getOrElse { false }
+                    if (wrote) break
+                }
+            }
+            // Always delegate to previous handler to keep default crash behavior
+            previousHandler?.uncaughtException(thread, throwable)
+        }
+    }
+
     override fun onCreate() {
+    // Install global crash handler that writes a crash.log to main storage (with fallbacks)
+    installCrashLogger()
+
         StrictMode.setVmPolicy(
             VmPolicy.Builder()
                 .let {
@@ -528,6 +598,41 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
         Dependencies.init(this)
         MonetCompat.enablePaletteCompat()
         ServiceNotifications.createAll()
+
+        // Attempt to restore previously saved YTMusic authentication session (non-blocking)
+        // This runs once per process start so that Settings screen & playback logic immediately
+        // see an authenticated provider if the user logged in earlier.
+        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val provider = com.rmusic.providers.ytmusic.YTMusicProvider.shared()
+                // 1) Pre-cargar visitorData desde preferencias si existe
+                val vdPrefs = getSharedPreferences("ytmusic_boot", Context.MODE_PRIVATE)
+                vdPrefs.getString("visitorData", null)?.let { provider.visitorData = it }
+
+                // 2) Restaurar sesión si hay estado guardado
+                if (!provider.isLoggedIn()) {
+                    val prefs = getSharedPreferences("ytmusic_auth", Context.MODE_PRIVATE)
+                    val raw = prefs.getString("session_state", null)
+                    if (!raw.isNullOrBlank()) {
+                        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                        val state = json.decodeFromString(
+                            com.rmusic.providers.ytmusic.models.account.AuthenticationState.serializer(),
+                            raw
+                        )
+                        provider.importSessionData(state)
+                    }
+                }
+
+                // 3) Asegurar visitorData para funcionamiento básico si aún falta y persistirla
+                if (provider.visitorData.isNullOrBlank()) {
+                    provider.ensureVisitorData()?.let { vd ->
+                        vdPrefs.edit().putString("visitorData", vd).apply()
+                    }
+                }
+            }.onFailure { err ->
+                if (BuildConfig.DEBUG) android.util.Log.w("YTMusicRestore", "Failed to restore YTMusic session", err)
+            }
+        }
     }
 
     override fun newImageLoader(context: PlatformContext) = ImageLoader.Builder(this)
@@ -544,7 +649,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
                 .build()
         }
         .bitmapFactoryExifOrientationStrategy(ExifOrientationStrategy.IGNORE)
-        .let { if (BuildConfig.DEBUG) it.logger(DebugLogger()) else it }
+    .let { builder: ImageLoader.Builder -> if (BuildConfig.DEBUG) builder.logger(DebugLogger()) else builder }
         .build()
 
     val persistMap = PersistMap()

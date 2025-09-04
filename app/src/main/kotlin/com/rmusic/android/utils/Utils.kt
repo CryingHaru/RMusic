@@ -23,6 +23,8 @@ import com.rmusic.providers.innertube.Innertube
 import com.rmusic.providers.innertube.models.bodies.ContinuationBody
 import com.rmusic.providers.innertube.requests.playlistPage
 import com.rmusic.providers.piped.models.Playlist
+import com.rmusic.providers.ytmusic.pages.SongResult as YTSongResult
+import com.rmusic.providers.ytmusic.pages.SongItem as YTSongItem
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onEach
@@ -140,6 +142,53 @@ val Song.asMediaItem: MediaItem
             }
         )
         .setCustomCacheKey(id)
+        .build()
+
+// YTMusic provider mappings (prefer this when authenticated)
+val YTSongResult.asMediaItem: MediaItem
+    get() = MediaItem.Builder()
+        .setMediaId(videoId)
+        .setUri(videoId)
+        .setCustomCacheKey(videoId)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artists.joinToString("") { it.name })
+                .setAlbumTitle(album?.title)
+                .setArtworkUri(thumbnails.firstOrNull()?.url?.toUri())
+                .setExtras(
+                    SongBundleAccessor.bundle {
+                        albumId = album?.browseId
+                        durationText = duration
+                        artistNames = artists.map { it.name }
+                        artistIds = artists.mapNotNull { it.browseId }
+                    }
+                )
+                .build()
+        )
+        .build()
+
+val YTSongItem.asMediaItem: MediaItem
+    get() = MediaItem.Builder()
+        .setMediaId(videoId)
+        .setUri(videoId)
+        .setCustomCacheKey(videoId)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artists.joinToString("") { it.name })
+                .setAlbumTitle(album?.title)
+                .setArtworkUri(thumbnails.firstOrNull()?.url?.toUri())
+                .setExtras(
+                    SongBundleAccessor.bundle {
+                        albumId = album?.browseId
+                        durationText = duration
+                        artistNames = artists.map { it.name }
+                        artistIds = artists.mapNotNull { it.browseId }
+                    }
+                )
+                .build()
+        )
         .build()
 
 val Duration.formatted

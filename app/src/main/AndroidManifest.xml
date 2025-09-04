@@ -179,7 +179,8 @@
         <service
             android:name=".service.PlayerService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback">
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false">
 
             <intent-filter>
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
