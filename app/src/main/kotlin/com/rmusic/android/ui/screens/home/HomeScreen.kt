@@ -64,6 +64,7 @@ import com.rmusic.android.ui.screens.playlistRoute
 import com.rmusic.android.ui.screens.searchResultRoute
 import com.rmusic.android.ui.screens.settingsRoute
 import com.rmusic.compose.routing.OnGlobalRoute
+import com.rmusic.compose.routing.rootRoute
 import com.rmusic.android.ui.screens.settingsRoute
 import com.rmusic.android.LocalPlayerAwareWindowInsets
 import com.rmusic.android.LocalPlayerServiceBinder

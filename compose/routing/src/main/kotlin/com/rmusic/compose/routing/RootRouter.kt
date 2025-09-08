@@ -152,6 +152,9 @@ private fun RouteHandler(
         onFinish = {
             predictiveBackProgress = null
             setChild(null)
+            // Emitir ruta raíz para notificar retorno desde una ruta modal (como Settings)
+            // y permitir que observadores (Player.kt) restablezcan visibilidad.
+            rootRoute.global()
         },
         onCancel = {
             predictiveBackProgress = null

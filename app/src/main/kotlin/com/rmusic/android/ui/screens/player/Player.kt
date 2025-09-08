@@ -100,6 +100,7 @@ import com.rmusic.android.utils.shouldBePlaying
 import com.rmusic.android.utils.thumbnail
 import com.rmusic.compose.persist.PersistMapCleanup
 import com.rmusic.compose.routing.OnGlobalRoute
+import com.rmusic.compose.routing.rootRoute
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.ThumbnailRoundness
@@ -190,6 +191,8 @@ fun Player(
 
     var hiddenByRoute by rememberSaveable { mutableStateOf(false) }
     OnGlobalRoute { (route, _) ->
+        // Ocultamos en rutas de pantalla completa (incluye ajustes); al volver,
+        // el enrutador emite rootRoute y esta rama reactivará el mini.
         hiddenByRoute = route == settingsRoute || route == albumRoute || route == artistRoute || route == searchRoute || route == searchResultRoute
 
         when {
