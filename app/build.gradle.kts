@@ -35,34 +35,13 @@ android {
     }
 
     signingConfigs {
-        // Carga opcional de variables desde un fichero local no versionado (signing.env)
-        val signingProps = java.util.Properties().apply {
-            val f = rootProject.file("signing.env")
-            if (f.exists()) f.inputStream().use { load(it) }
-        }
-
-        fun propOrEnv(name: String): String? =
-            (signingProps.getProperty(name) ?: System.getenv(name))?.takeIf { it.isNotBlank() }
-
-        val isReleaseTask = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
-
         create("release") {
-            val keystorePath = propOrEnv("RMUSIC_KEYSTORE_PATH") ?: "rmusic-release-key.keystore"
-            val releaseKeystoreFile = rootProject.file(keystorePath)
-
-            // No establecer por defecto valores sensibles; leer de env/props y solo exigirlos en builds release
-            storeFile = releaseKeystoreFile.takeIf { it.exists() }
-            storePassword = propOrEnv("RMUSIC_KEYSTORE_PASSWORD")
-            keyAlias = propOrEnv("RMUSIC_KEY_ALIAS")
-            keyPassword = propOrEnv("RMUSIC_KEY_PASSWORD")
-
-            if (isReleaseTask) {
-                if (storeFile == null || storePassword.isNullOrBlank() || keyAlias.isNullOrBlank() || keyPassword.isNullOrBlank()) {
-                    throw GradleException("Faltan credenciales de firma para 'release'. Crea 'signing.env' a partir de 'signing.env.example' o exporta variables de entorno.")
-                }
-            }
+            storeFile = file("../rmusic-release-key.keystore")
+            storePassword = System.getenv("RMUSIC_KEYSTORE_PASSWORD") ?: "LuckyLess1"
+            keyAlias = System.getenv("RMUSIC_KEY_ALIAS") ?: "cryingharu"
+            keyPassword = System.getenv("RMUSIC_KEY_PASSWORD") ?: "LuckyLess1"
         }
-
+        
         create("ci") {
             storeFile = System.getenv("ANDROID_NIGHTLY_KEYSTORE")?.let { file(it) }
             storePassword = System.getenv("ANDROID_NIGHTLY_KEYSTORE_PASSWORD")

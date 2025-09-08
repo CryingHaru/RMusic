@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,6 +78,11 @@ import com.rmusic.android.ui.components.themed.IconButton
 import com.rmusic.android.ui.components.themed.SecondaryTextButton
 import com.rmusic.android.ui.components.themed.SliderDialog
 import com.rmusic.android.ui.components.themed.SliderDialogBody
+import com.rmusic.android.ui.screens.settingsRoute
+import com.rmusic.android.ui.screens.albumRoute
+import com.rmusic.android.ui.screens.artistRoute
+import com.rmusic.android.ui.screens.searchRoute
+import com.rmusic.android.ui.screens.searchResultRoute
 import com.rmusic.android.ui.modifiers.PinchDirection
 import com.rmusic.android.ui.modifiers.onSwipe
 import com.rmusic.android.ui.modifiers.pinchToToggle
@@ -178,20 +184,35 @@ fun Player(
     val metadata = remember(mediaItem) { mediaItem?.mediaMetadata }
     val extras = remember(metadata) { metadata?.extras?.songBundle }
 
-    val horizontalBottomPaddingValues = windowInsets
-        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+    val horizontalPaddingValues = windowInsets
+        .only(WindowInsetsSides.Horizontal)
         .asPaddingValues()
 
-    OnGlobalRoute { if (layoutState.expanded) layoutState.collapseSoft() }
+    var hiddenByRoute by rememberSaveable { mutableStateOf(false) }
+    OnGlobalRoute { (route, _) ->
+        hiddenByRoute = route == settingsRoute || route == albumRoute || route == artistRoute || route == searchRoute || route == searchResultRoute
 
-    if (mediaItem != null) BottomSheet(
+        when {
+            hiddenByRoute -> layoutState.dismissSoft()
+            // Ensure it shows up (collapsed) on allowed routes when there's media
+            mediaItem != null && layoutState.dismissed -> layoutState.collapseSoft()
+            layoutState.expanded -> layoutState.collapseSoft()
+        }
+    }
+
+    if (mediaItem != null && !hiddenByRoute) BottomSheet(
         state = layoutState,
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier,
         onDismiss = {
             binder?.let { onDismiss(it) }
             layoutState.dismissSoft()
         },
         backHandlerEnabled = !menuState.isDisplayed,
+    collapsedBottomPadding = Dimensions.items.bottomNavigationHeight +
+            windowInsets
+                .only(WindowInsetsSides.Bottom)
+                .asPaddingValues()
+        .calculateBottomPadding(),
         collapsedContent = { innerModifier ->
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -223,7 +244,8 @@ fun Player(
                         )
                     }
                     .then(innerModifier)
-                    .padding(horizontalBottomPaddingValues)
+                    .padding(horizontalPaddingValues)
+                    .padding(bottom = with(LocalDensity.current) { 3f.toDp() })
             ) {
                 Spacer(modifier = Modifier.width(2.dp))
 
@@ -364,8 +386,9 @@ fun Player(
         if (isShowingLyricsDialog) LyricsDialog(onDismiss = { isShowingLyricsDialog = false })
 
         val playerBottomSheetState = rememberBottomSheetState(
-            dismissedBound = 64.dp + horizontalBottomPaddingValues.calculateBottomPadding(),
-            expandedBound = layoutState.expandedBound
+            dismissedBound = Dimensions.items.collapsedPlayerHeight,
+            expandedBound = layoutState.expandedBound,
+            collapsedBound = 0.dp
         )
 
         val containerModifier = Modifier
@@ -419,7 +442,11 @@ fun Player(
             }
         }
 
-        val controlsContent: @Composable (modifier: Modifier) -> Unit = { innerModifier ->
+        // Estados para diálogos, declarados antes de usarlos en lambdas
+        var audioDialogOpen by rememberSaveable { mutableStateOf(false) }
+        var boostDialogOpen by rememberSaveable { mutableStateOf(false) }
+
+    val controlsContent: @Composable (modifier: Modifier) -> Unit = { innerModifier ->
             Controls(
                 media = mediaItem?.toUiMedia(duration),
                 binder = binder,
@@ -427,7 +454,11 @@ fun Player(
                 setLikedAt = { likedAt = it },
                 shouldBePlaying = shouldBePlaying,
                 position = position,
-                modifier = innerModifier
+                modifier = innerModifier,
+                onOpenLyricsDialog = { isShowingLyricsDialog = true },
+    onOpenQueue = { playerBottomSheetState.expandSoft() },
+    onQueueDragDelta = { dy -> playerBottomSheetState.dispatchRawDelta(dy) },
+    onQueueDragEnd = { v -> playerBottomSheetState.fling(v, null) }
             )
         }
 
@@ -450,26 +481,28 @@ fun Player(
                     .fillMaxHeight()
                     .weight(1f)
             )
-        } else Column(
+    } else Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = containerModifier.padding(top = 54.dp)
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.weight(1.25f)
+        modifier = Modifier.weight(1.0f)
             ) {
-                thumbnailContent(Modifier.padding(horizontal = 32.dp, vertical = 8.dp))
+        thumbnailContent(
+            Modifier
+            .padding(horizontal = 32.dp, vertical = 8.dp)
+            .fillMaxWidth(0.85f)
+        )
             }
 
-            controlsContent(
+        controlsContent(
                 Modifier
                     .padding(vertical = 8.dp)
                     .fillMaxWidth()
-                    .weight(1f)
+            .weight(1.25f)
             )
         }
-
-        var audioDialogOpen by rememberSaveable { mutableStateOf(false) }
 
         if (audioDialogOpen) SliderDialog(
             onDismiss = { audioDialogOpen = false },
@@ -512,8 +545,6 @@ fun Player(
                 )
             }
         }
-
-        var boostDialogOpen by rememberSaveable { mutableStateOf(false) }
 
         if (boostDialogOpen) {
             fun submit(state: Float) = transaction {

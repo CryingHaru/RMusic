@@ -34,7 +34,6 @@ import kotlin.random.Random
 class YTMusicAPI(
     var baseHeaders: Map<String, String> = emptyMap(),
 ) {
-    var proxy: java.net.Proxy? = null
 
     private fun computedBaselineHeaders(): Map<String,String> = mapOf(
         "accept" to "*/*",
@@ -42,34 +41,14 @@ class YTMusicAPI(
         "priority" to "u=1, i",
     )
 
-    private val chromeClientHintPrefix = setOf(
-        "sec-ch-ua","sec-ch-ua-arch","sec-ch-ua-bitness","sec-ch-ua-form-factors","sec-ch-ua-full-version","sec-ch-ua-full-version-list","sec-ch-ua-mobile","sec-ch-ua-model","sec-ch-ua-platform","sec-ch-ua-platform-version","sec-ch-ua-wow64"
-    )
-
     fun setOriginalHeaders(headers: Map<String,String>) {
         baseHeaders = headers
         headers["cookie"]?.let { cookie = it }
     }
-
-    fun setSession(
-        authorization: String? = null,
-        cookieHeader: String? = null,
-        xGoogAuthUser: String? = "0",
-        xGoogVisitorId: String? = null,
-        extra: Map<String,String> = emptyMap()
-    ) {
-        val mutable = baseHeaders.toMutableMap()
-        authorization?.let { mutable["authorization"] = it }
-        xGoogAuthUser?.let { mutable["x-goog-authuser"] = it }
-        xGoogVisitorId?.let { mutable["x-goog-visitor-id"] = it }
-        cookieHeader?.let { mutable["cookie"] = it; cookie = it }
-        mutable += extra
-        baseHeaders = mutable
-    }
     private val http = HttpClient(OkHttp) {
-        install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; encodeDefaults = true; isLenient = true }) }
-        install(ContentEncoding) { gzip(); deflate() }
-        defaultRequest { url("https://music.youtube.com/youtubei/v1/") }
+    install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; encodeDefaults = true; isLenient = true }) }
+    install(ContentEncoding) { gzip(); deflate() }
+    defaultRequest { url("https://music.youtube.com/youtubei/v1/") }
     }
 
     companion object {
@@ -78,12 +57,17 @@ class YTMusicAPI(
         private const val IOS_UA = "com.google.ios.youtube/$IOS_VERSION (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
         private const val CLIENT_NAME_NUMERIC = "5"
         
-        // Android client constants (siguiendo el ejemplo funcional de youtube-request.js)
+        // Android client constants
         private const val ANDROID_VERSION = "19.49.37"
         private const val ANDROID_API_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
         private const val ANDROID_UA = "com.google.android.youtube/$ANDROID_VERSION (Linux; U; Android 11) gzip"
         private const val ANDROID_CLIENT_NAME_NUMERIC = "3"
         private const val ANDROID_SDK_VERSION = 30
+        
+        // Oculus (Android_VR) client constants
+        private const val OCULUS_VERSION = "1.61.48"
+        private const val OCULUS_CLIENT_NAME_NUMERIC = "28"
+        private const val OCULUS_UA = "com.google.android.apps.youtube.vr.oculus/$OCULUS_VERSION (Linux; U; Android 12; es-US; Quest 3; Build/SQ3A.220605.009.A1; Cronet/132.0.6808.3)"
         
         private const val ORIGIN = "https://music.youtube.com"
         private const val WEB_REMIX_VERSION = "1.20250215.01.00"
@@ -199,12 +183,54 @@ class YTMusicAPI(
         )
     )
 
-    // ========== FUNCIONES PRINCIPALES (SIN AUTENTICACIÓN) ==========
-    
-    // Player usando iOS por defecto (según requerimiento)
-    suspend fun player(videoId: String): PlayerResponse = playeriOS(videoId)
+    private fun oculusContext(): YTMusicContext = YTMusicContext(
+        client = YTMusicContext.Client(
+            clientName = "Android_VR",
+            clientVersion = OCULUS_VERSION,
+            androidSdkVersion = 32,
+            gl = locale.gl.ifBlank { "US" },
+            hl = locale.hl.ifBlank { "es" },
+            visitorData = visitorData,
+            userAgent = OCULUS_UA,
+            deviceMake = "Oculus",
+            deviceModel = "Quest 3",
+            osName = "Android",
+            osVersion = "12",
+        )
+    )
 
-    // Nueva función player usando Android client (siguiendo ejemplo youtube-request.js)
+    // ========== FUNCIONES PRINCIPALES (SIN AUTENTICACIÓN) ==========
+
+    suspend fun player(videoId: String): PlayerResponse = playerOculus(videoId)
+
+    // Player usando Oculus (Android_VR) como principal para obtener streaming completo
+    suspend fun playerOculus(videoId: String): PlayerResponse {
+        ensureVisitor()
+        val body = PlayerBody(
+            context = oculusContext(),
+            videoId = videoId,
+            cpn = genCpn(),
+            contentCheckOk = true,
+            racyCheckOk = true,
+        )
+        val resp = http.post("https://youtubei.googleapis.com/youtubei/v1/player") {
+            contentType(ContentType.Application.Json)
+            userAgent(OCULUS_UA)
+            // Baseline + headers específicos de Oculus
+            computedBaselineHeaders().forEach { (k, v) -> if (!baseHeaders.containsKey(k)) header(k, v) }
+            baseHeaders.forEach { (k, v) -> header(k, v) }
+            header("X-YouTube-Client-Name", OCULUS_CLIENT_NAME_NUMERIC)
+            header("X-YouTube-Client-Version", OCULUS_VERSION)
+            header("X-GOOG-API-FORMAT-VERSION", "2")
+            visitorData?.let { header("X-Goog-Visitor-Id", it) }
+            cookie?.let { header("Cookie", it) }
+            // No limitamos los fields para mantener compatibilidad con el modelo PlayerResponse
+            parameter("prettyPrint", false)
+            setBody(body)
+        }
+        return resp.body()
+    }
+
     suspend fun playerAndroid(videoId: String): PlayerResponse {
         ensureVisitor()
         val body = PlayerBody(
@@ -221,9 +247,7 @@ class YTMusicAPI(
         return resp.body()
     }
 
-    // Fallback iOS player (solo si Android falla)
     suspend fun playeriOS(videoId: String): PlayerResponse {
-        // Alinear con index.js: usar endpoint de www.youtube.com con headers iOS y key Android
         ensureVisitor()
         val body = PlayerBody(
             context = iosContext(),
@@ -258,7 +282,7 @@ class YTMusicAPI(
     
     suspend fun browse(browseId: String? = null, params: String? = null, continuation: String? = null): HttpResponse = http.post("browse") {
         ensureVisitor()
-        iosHeaders(this) // Usar iOS por defecto
+        iosHeaders(this) 
         setBody(
             BrowseBody(
                 context = iosContext(),
@@ -271,7 +295,7 @@ class YTMusicAPI(
 
     suspend fun search(query: String, params: String? = null): HttpResponse = http.post("search") {
         ensureVisitor()
-        iosHeaders(this) // Usar iOS por defecto
+        iosHeaders(this)
         setBody(
             SearchBody(
                 context = iosContext(),
@@ -283,7 +307,7 @@ class YTMusicAPI(
 
     suspend fun next(videoId: String? = null, playlistId: String? = null, playlistSetVideoId: String? = null, index: Int? = null, params: String? = null, continuation: String? = null): HttpResponse = http.post("next") {
         ensureVisitor()
-        iosHeaders(this) // Usar iOS por defecto
+        iosHeaders(this) 
         setBody(
             NextBody(
                 context = iosContext(),
@@ -296,9 +320,7 @@ class YTMusicAPI(
             )
         )
     }
-    
-    // ========== FUNCIONES DE CUENTA (REQUIEREN AUTENTICACIÓN) ==========
-    
+
     suspend fun accountMenu(): HttpResponse = http.post("account/account_menu") {
         androidHeaders(this) // Android para funciones de cuenta (requerido)
         setBody(AccountMenuBody(context = androidContext()))

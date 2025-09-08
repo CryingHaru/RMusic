@@ -10,7 +10,6 @@ import io.ktor.client.call.body
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
-import java.net.Proxy
 import java.util.Locale
 import java.net.HttpURLConnection
 import java.net.URL
@@ -28,9 +27,7 @@ class YTMusicProvider {
     var cookie: String?
         get() = api.cookie
         set(value) { api.cookie = value }
-    var proxy: Proxy?
-        get() = api.proxy
-        set(value) { api.proxy = value }
+    // Proxy eliminado: no expuesto ni usado
 
     // ========== FUNCIONES BÁSICAS (SIN AUTENTICACIÓN REQUERIDA) ==========
     
@@ -52,18 +49,29 @@ class YTMusicProvider {
 
     // Devuelve un SongResult listo para convertir a MediaItem
     suspend fun getPlayer(videoId: String): Result<SongResult> = runCatching {
-        // iOS únicamente, siguiendo index.js
+        // Priorizar Oculus para obtener URLs completas sin fragmentos
         // Asegurar que visitor esté poblado
-        val pr = api.playeriOS(videoId)
+        val pr = try { api.playerOculus(videoId) } catch (_: Throwable) { api.playeriOS(videoId) }
         parseStreamingData(pr)
     }
 
-    // Usa cliente iOS por defecto (pedido), fallback a Android
+    // Permite seleccionar explícitamente el cliente a usar
+    enum class YTClient { OCULUS, IOS, ANDROID }
+
+    private suspend fun playerFor(videoId: String, client: YTClient): com.rmusic.providers.ytmusic.models.response.PlayerResponse = when (client) {
+        YTClient.OCULUS -> api.playerOculus(videoId)
+        YTClient.IOS -> api.playeriOS(videoId)
+        YTClient.ANDROID -> api.playerAndroid(videoId)
+    }
+
+    // Usa cliente Oculus por defecto, fallback a iOS/Android
     suspend fun getStreamUrl(videoId: String): Result<String?> = runCatching {
         val qRank = mapOf("AUDIO_QUALITY_HIGH" to 3, "AUDIO_QUALITY_MEDIUM" to 2, "AUDIO_QUALITY_LOW" to 1)
-        
-    val pr = api.playeriOS(videoId)
-    if (pr.playabilityStatus?.status != "OK") return@runCatching null
+        val pr = run {
+            val p = api.playerOculus(videoId)
+            if (p.playabilityStatus?.status == "OK") p else api.playeriOS(videoId)
+        }
+        if (pr.playabilityStatus?.status != "OK") return@runCatching null
         
         val sd = pr.streamingData ?: return@runCatching null
         val adaptive = sd.adaptiveFormats.orEmpty().filter { it.isAudio }
@@ -83,12 +91,32 @@ class YTMusicProvider {
         else rawUrl + (if (rawUrl.contains('?')) "&" else "?") + "ratebypass=yes"
     }
 
+    // Variante que permite elegir el cliente explícitamente
+    suspend fun getStreamUrl(videoId: String, client: YTClient): Result<String?> = runCatching {
+        val qRank = mapOf("AUDIO_QUALITY_HIGH" to 3, "AUDIO_QUALITY_MEDIUM" to 2, "AUDIO_QUALITY_LOW" to 1)
+        val pr = playerFor(videoId, client)
+        if (pr.playabilityStatus?.status != "OK") return@runCatching null
+        val sd = pr.streamingData ?: return@runCatching null
+        val adaptive = sd.adaptiveFormats.orEmpty().filter { it.isAudio }
+        val progressive = sd.formats.orEmpty().filter { it.isAudio || it.hasEmbeddedAudio }
+        val formats = adaptive + progressive
+        if (formats.isEmpty()) {
+            return@runCatching listOfNotNull(sd.hlsManifestUrl, sd.serverAbrStreamingUrl, sd.dashManifestUrl).firstOrNull()
+        }
+        val chosen = formats.maxByOrNull { (qRank[it.audioQuality] ?: 0) * 1_000_000 + (it.bitrate ?: it.averageBitrate ?: 0) }
+            ?: return@runCatching null
+        val rawUrl = chosen.url ?: return@runCatching null
+        if (rawUrl.contains("ratebypass=")) rawUrl else rawUrl + (if (rawUrl.contains('?')) "&" else "?") + "ratebypass=yes"
+    }
+
     
     suspend fun getBestAudioStream(videoId: String): Result<AudioStreamInfo?> = runCatching {
         val qRank = mapOf("AUDIO_QUALITY_HIGH" to 3, "AUDIO_QUALITY_MEDIUM" to 2, "AUDIO_QUALITY_LOW" to 1)
-        
-    val pr = api.playeriOS(videoId)
-    if (pr.playabilityStatus?.status != "OK") return@runCatching null
+        val pr = run {
+            val p = api.playerOculus(videoId)
+            if (p.playabilityStatus?.status == "OK") p else api.playeriOS(videoId)
+        }
+        if (pr.playabilityStatus?.status != "OK") return@runCatching null
         
         val sd = pr.streamingData ?: return@runCatching null
         val formats = (sd.adaptiveFormats.orEmpty() + sd.formats.orEmpty())
@@ -105,6 +133,40 @@ class YTMusicProvider {
         val finalUrl = if (url.contains("ratebypass=")) url 
                       else url + (if (url.contains('?')) "&" else "?") + "ratebypass=yes"
         
+        AudioStreamInfo(
+            url = finalUrl,
+            itag = bestFmt.itag,
+            bitrate = bestFmt.bitrate,
+            averageBitrate = bestFmt.averageBitrate,
+            mimeType = bestFmt.mimeType,
+            audioQuality = bestFmt.audioQuality,
+            audioSampleRate = bestFmt.audioSampleRate,
+            loudnessDb = bestFmt.loudnessDb ?: pr.playerConfig?.audioConfig?.loudnessDb,
+            contentLength = bestFmt.contentLength,
+            captionLanguages = pr.captions?.playerCaptionsTracklistRenderer?.captionTracks
+                ?.mapNotNull { it.languageCode }?.distinct().orEmpty(),
+            initRange = bestFmt.initRange?.let { it.start.toLongOrNull() to it.end.toLongOrNull() }
+                ?.takeIf { it.first != null && it.second != null }
+                ?.let { it.first!! to it.second!! },
+            indexRange = bestFmt.indexRange?.let { it.start.toLongOrNull() to it.end.toLongOrNull() }
+                ?.takeIf { it.first != null && it.second != null }
+                ?.let { it.first!! to it.second!! }
+        )
+    }
+
+    // Variante por cliente explícito
+    suspend fun getBestAudioStream(videoId: String, client: YTClient): Result<AudioStreamInfo?> = runCatching {
+        val qRank = mapOf("AUDIO_QUALITY_HIGH" to 3, "AUDIO_QUALITY_MEDIUM" to 2, "AUDIO_QUALITY_LOW" to 1)
+        val pr = playerFor(videoId, client)
+        if (pr.playabilityStatus?.status != "OK") return@runCatching null
+        val sd = pr.streamingData ?: return@runCatching null
+        val formats = (sd.adaptiveFormats.orEmpty() + sd.formats.orEmpty())
+            .filter { it.isAudio && !it.url.isNullOrEmpty() }
+            .sortedWith(compareByDescending<PlayerResponse.Format> { qRank[it.audioQuality] ?: 0 }
+                .thenByDescending { it.bitrate ?: it.averageBitrate ?: 0 })
+        val bestFmt = formats.firstOrNull() ?: return@runCatching null
+        val url = bestFmt.url!!
+        val finalUrl = if (url.contains("ratebypass=")) url else url + (if (url.contains('?')) "&" else "?") + "ratebypass=yes"
         AudioStreamInfo(
             url = finalUrl,
             itag = bestFmt.itag,

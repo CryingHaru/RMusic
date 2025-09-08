@@ -2260,33 +2260,65 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                     .withUri(cachedUri.uri)
                     .withYouTubeRange(null, null, cachedUri.meta, /* useSegmentation = */ true)
             } ?: run {
-                // Priorizar YTMusic como proveedor primario (sin requerir login)
+                // Priorizar YTMusic como proveedor primario (sin requerir login) con orden Oculus > iOS > Android,
+                // validando SIEMPRE que la URL responde 200/206 antes de usarla.
                 run {
                     val ytProvider = YTMusicProvider.shared()
-                    Log.d(TAG, "Resolver:YTMusic.getBestAudioStream(${ '$' }mediaId) ...")
-                    val best = runBlocking(Dispatchers.IO) { ytProvider.getBestAudioStream(mediaId).getOrNull() }
-                    var directUrl = best?.url
-                    // Fallback: intentar obtener una URL directa simple
-                    if (directUrl == null) {
-                        Log.d(TAG, "Resolver:YTMusic.getStreamUrl(${ '$' }mediaId) ...")
-                        val fetchedUrl = runBlocking(Dispatchers.IO) { ytProvider.getStreamUrl(mediaId).getOrNull() }
-                        if (BuildConfig.DEBUG) {
-                            val preview = fetchedUrl?.let { if (it.length > 120) it.substring(0, 120) + "…" else it }
-                            Log.d(TAG, "YTMusic.getStreamUrl($mediaId) -> ${preview ?: "null"}")
+                    val clients = listOf(
+                        YTMusicProvider.YTClient.OCULUS to "Oculus",
+                        YTMusicProvider.YTClient.IOS to "iOS",
+                        YTMusicProvider.YTClient.ANDROID to "Android"
+                    )
+
+                    var chosenUrl: String? = null
+                    var chosenBest: com.rmusic.providers.ytmusic.YTMusicProvider.AudioStreamInfo? = null
+                    var chosenClientLabel: String? = null
+
+                    for ((client, label) in clients) {
+                        Log.d(TAG, "Resolver:YTMusic trying $label for $mediaId …")
+                        val best = runBlocking(Dispatchers.IO) {
+                            ytProvider.getBestAudioStream(mediaId, client).getOrNull()
                         }
-                        directUrl = fetchedUrl
+                        var directUrl = best?.url
+                        if (directUrl == null) {
+                            val fetchedUrl = runBlocking(Dispatchers.IO) {
+                                ytProvider.getStreamUrl(mediaId, client).getOrNull()
+                            }
+                            if (BuildConfig.DEBUG) {
+                                val preview = fetchedUrl?.let { if (it.length > 120) it.substring(0, 120) + "…" else it }
+                                Log.d(TAG, "YTMusic.getStreamUrl($mediaId) [$label] -> ${preview ?: "null"}")
+                            }
+                            directUrl = fetchedUrl
+                        }
+
+                        if (directUrl != null) {
+                            // Validar con HEAD 200/206 antes de usar
+                            val ok = runBlocking(Dispatchers.IO) {
+                                ytProvider.testUrlAccess(directUrl!!).getOrDefault(false)
+                            }
+                            if (ok) {
+                                chosenUrl = directUrl
+                                chosenBest = best
+                                chosenClientLabel = label
+                                break
+                            } else {
+                                Log.w(TAG, "Resolver:YTMusic URL not accessible (no 200/206) for $label -> skipping")
+                            }
+                        }
                     }
-                    if (directUrl != null) {
-                        Log.d(TAG, "Resolver:YTMusic resolved -> ${'$'}directUrl")
-                        onProviderUsed("YTMusic")
+
+                    if (chosenUrl != null) {
+                        Log.d(TAG, "Resolver:YTMusic resolved -> $chosenUrl")
+                        onProviderUsed(if (BuildConfig.DEBUG) "YTMusic ($chosenClientLabel)" else "YTMusic")
 
                         // Determinar Content-Length y soporte de rangos
-                        val contentLen = runBlocking(Dispatchers.IO) { ytProvider.headContentLength(directUrl!!).getOrNull() }
+                        val contentLen = runBlocking(Dispatchers.IO) { ytProvider.headContentLength(chosenUrl!!).getOrNull() }
                         val supportsRanges = contentLen?.let { len ->
-                            runBlocking(Dispatchers.IO) { ytProvider.supportsByteRanges(directUrl!!, len).getOrDefault(false) }
+                            runBlocking(Dispatchers.IO) { ytProvider.supportsByteRanges(chosenUrl!!, len).getOrDefault(false) }
                         } ?: true // asumir true si no se pudo determinar
 
                         // Persistir información básica del formato si está disponible
+                        val best = chosenBest
                         runCatching {
                             if (best != null) transaction {
                                 // Asegurar que exista la fila Song antes de insertar Format (FK songId -> Song.id)
@@ -2312,24 +2344,24 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                                         contentLength = contentLen,
                                         lastModified = null,
                                         loudnessDb = best.loudnessDb,
-                                        url = directUrl
+                                        url = chosenUrl
                                     )
                                 )
                             }
                         }
 
-                        val uri = directUrl.toUri()
+                        val uri = chosenUrl!!.toUri()
                         // Guardar content-length si está disponible
                         uriCache.push(key = mediaId, meta = contentLen, uri = uri, validUntil = null)
                         // No añadir headers especiales; seguir estrategia simple tipo fetch() de index.js
                         val resolved = dataSpec.withUri(uri)
                             .withYouTubeRange(best?.initRange, best?.indexRange, contentLen, /* useSegmentation = */ supportsRanges)
-                        Log.d(TAG, "Resolver:return resolved with ranges=${'$'}{best?.initRange}/${'$'}{best?.indexRange} supportsRanges=${'$'}supportsRanges len=${'$'}contentLen")
+            Log.d(TAG, "Resolver:return resolved with ranges=${best?.initRange}/${best?.indexRange} supportsRanges=$supportsRanges len=$contentLen")
                         return@resolver resolved
                     }
                 }
                 // Sin fallback a Innertube: seguir la implementación de index.js (solo iOS)
-                Log.e(TAG, "Resolver:PlayableFormatNotFound for ${'$'}mediaId")
+        Log.e(TAG, "Resolver:PlayableFormatNotFound for $mediaId")
                 throw PlayableFormatNotFoundException()
             }
         }.handleUnknownErrors {

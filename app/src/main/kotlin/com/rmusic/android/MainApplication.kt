@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
@@ -84,7 +85,7 @@ import com.rmusic.android.ui.screens.settingsRoute
 import com.rmusic.android.utils.DisposableListener
 import com.rmusic.android.utils.KeyedCrossfade
 import com.rmusic.android.utils.LocalMonetCompat
-import com.rmusic.android.utils.asMediaItem
+// deduped import remains above
 import com.rmusic.providers.ytmusic.pages.SongResult as YTSongResult
 import com.rmusic.android.utils.collectProvidedBitmapAsState
 import com.rmusic.android.utils.forcePlay
@@ -137,6 +138,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 
 private const val TAG = "MainActivity"
 private val coroutineScope = CoroutineScope(Dispatchers.IO)
@@ -262,12 +264,13 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
                 label = ""
             )
 
+            val extraCollapsedPadding = with(density) { 3f.toDp() }
+
             val playerBottomSheetState = rememberBottomSheetState(
                 key = vm.binder,
                 dismissedBound = 0.dp,
-                // Add bottom navigation height so the collapsed mini player appears above the nav bar.
-                // Collapsed only reserves the mini player height (navigation bar draws above via zIndex)
-                collapsedBound = Dimensions.items.collapsedPlayerHeight + bottomDp,
+                // Altura colapsada = alto real del mini player (sin insets). El clearance sobre la barra se maneja en BottomSheet.
+                collapsedBound = Dimensions.items.collapsedPlayerHeight + extraCollapsedPadding,
                 expandedBound = maxHeight
             )
 
@@ -278,10 +281,13 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
                 imeVisible,
                 imeBottomDp
             ) {
+                val extraGap = if (playerBottomSheetState.collapsed) 8.dp else 0.dp
+                val playerPadding = Dimensions.items.bottomNavigationHeight + extraGap
+                val playerValue = playerBottomSheetState.value + playerPadding
                 val bottom =
-                    if (imeVisible) imeBottomDp.coerceAtLeast(playerBottomSheetState.value)
-                    else playerBottomSheetState.value.coerceIn(
-                        animatedBottomDp..playerBottomSheetState.collapsedBound
+                    if (imeVisible) imeBottomDp.coerceAtLeast(playerValue)
+                    else playerValue.coerceIn(
+                        animatedBottomDp..(playerBottomSheetState.collapsedBound + playerPadding)
                     )
 
                 windowInsets
@@ -339,7 +345,9 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
                     ) {
                         Player(
                             layoutState = playerBottomSheetState,
-                            modifier = Modifier.align(Alignment.BottomCenter)
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .zIndex(2f)
                         )
                     }
 
@@ -563,6 +571,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
                 for (target in candidatePaths) {
                     wrote = runCatching {
                         target.parentFile?.mkdirs()
+        val LocalBottomBarHeight = compositionLocalOf { Dimensions.items.bottomNavigationHeight }
                         java.io.FileOutputStream(target, /* append = */ true).use { fos ->
                             fos.write(sb.toString().toByteArray())
                             fos.flush()
@@ -614,8 +623,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
                     val prefs = getSharedPreferences("ytmusic_auth", Context.MODE_PRIVATE)
                     val raw = prefs.getString("session_state", null)
                     if (!raw.isNullOrBlank()) {
-                        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-                        val state = json.decodeFromString(
+                        val state = Json.decodeFromString(
                             com.rmusic.providers.ytmusic.models.account.AuthenticationState.serializer(),
                             raw
                         )

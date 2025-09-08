@@ -56,10 +56,16 @@ fun BottomSheet(
     onDismiss: (() -> Unit)? = null,
     indication: Indication? = LocalIndication.current,
     backHandlerEnabled: Boolean = true,
+    // Padding inferior adicional aplicado solo cuando el sheet está colapsado (se desvanece al expandir)
+    collapsedBottomPadding: Dp = 0.dp,
     content: @Composable BoxScope.() -> Unit
 ) = Box(
     modifier = modifier
-        .offset(y = (state.expandedBound - state.value).coerceAtLeast(0.dp))
+        .offset(
+            y = (
+                state.expandedBound - state.value - (1f - state.progress) * collapsedBottomPadding
+            ).coerceAtLeast(0.dp)
+        )
         .pointerInput(state) {
             val velocityTracker = VelocityTracker()
 

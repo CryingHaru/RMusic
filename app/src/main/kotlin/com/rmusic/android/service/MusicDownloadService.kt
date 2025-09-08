@@ -126,8 +126,15 @@ class MusicDownloadService : InvincibleService() {
             android.util.Log.w(TAG, "Storage permissions not granted, downloads may fail")
         }
         
-        // Initialize download manager with external storage Music directory
-        val musicDir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC), "RMusic")
+        // Initialize download directory with Scoped Storage compatibility
+        // - On Android 10+ prefer app-specific external dir (no special permission needed)
+        // - Use public Music directory only on legacy devices
+        val musicDir = when {
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q -> {
+                File(getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC), "RMusic")
+            }
+            else -> File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC), "RMusic")
+        }
         musicDir.mkdirs()
         
         android.util.Log.d(TAG, "Music directory: ${musicDir.absolutePath}")

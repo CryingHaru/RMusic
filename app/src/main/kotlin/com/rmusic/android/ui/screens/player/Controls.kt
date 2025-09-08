@@ -52,6 +52,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState
 import androidx.media3.common.Player
 import androidx.media3.common.C
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import com.rmusic.android.Database
 import com.rmusic.android.LocalPlayerServiceBinder
 import com.rmusic.android.R
@@ -65,9 +70,11 @@ import com.rmusic.android.ui.components.SeekBar
 import com.rmusic.android.ui.components.themed.BigIconButton
 import com.rmusic.android.ui.components.themed.IconButton
 import com.rmusic.android.ui.screens.artistRoute
+import com.rmusic.android.ui.modifiers.onSwipe
 import com.rmusic.android.utils.bold
 import com.rmusic.android.utils.forceSeekToNext
 import com.rmusic.android.utils.forceSeekToPrevious
+import com.rmusic.android.utils.shuffleQueue
 import com.rmusic.android.utils.secondary
 import com.rmusic.android.utils.semiBold
 import com.rmusic.android.utils.isDownloaded
@@ -88,6 +95,44 @@ import androidx.lifecycle.lifecycleScope
 
 private val DefaultOffset = 24.dp
 
+// Nuevo botón de control sin bordes con overlay blanco al presionar
+@Composable
+private fun ControlIcon(
+    @DrawableRes iconId: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    iconSize: Dp = 28.dp,
+    containerSize: Dp = 56.dp,
+    tint: Color? = null
+) {
+    val (colorPalette) = LocalAppearance.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val tintColor = tint ?: colorPalette.text
+
+    Box(
+        modifier = modifier
+            .size(containerSize)
+            .clip(16.dp.roundedShape)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                enabled = enabled,
+                onClick = onClick
+            )
+            .background(if (pressed) Color.White.copy(alpha = 0.12f) else Color.Transparent),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(iconId),
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(tintColor),
+            modifier = Modifier.size(iconSize)
+        )
+    }
+}
+
 @Composable
 fun Controls(
     media: UiMedia?,
@@ -97,7 +142,11 @@ fun Controls(
     shouldBePlaying: Boolean,
     position: Long,
     modifier: Modifier = Modifier,
-    layout: PlayerPreferences.PlayerLayout = PlayerPreferences.playerLayout
+    layout: PlayerPreferences.PlayerLayout = PlayerPreferences.playerLayout,
+    onOpenLyricsDialog: (() -> Unit)? = null,
+    onOpenQueue: (() -> Unit)? = null,
+    onQueueDragDelta: ((Float) -> Unit)? = null,
+    onQueueDragEnd: ((Float) -> Unit)? = null
 ) {
     val shouldBePlayingTransition = updateTransition(
         targetState = shouldBePlaying,
@@ -119,10 +168,15 @@ fun Controls(
             likedAt = likedAt,
             setLikedAt = setLikedAt,
             playButtonRadius = playButtonRadius,
-            modifier = modifier
+            modifier = modifier,
+            onOpenLyricsDialog = onOpenLyricsDialog,
+            onOpenQueue = onOpenQueue,
+            onQueueDragDelta = onQueueDragDelta,
+            onQueueDragEnd = onQueueDragEnd
         )
 
-        PlayerPreferences.PlayerLayout.New -> ModernControls(
+        // Unificamos el diseño para ambos layouts
+        PlayerPreferences.PlayerLayout.New -> ClassicControls(
             media = media,
             binder = binder,
             shouldBePlaying = shouldBePlaying,
@@ -130,7 +184,11 @@ fun Controls(
             likedAt = likedAt,
             setLikedAt = setLikedAt,
             playButtonRadius = playButtonRadius,
-            modifier = modifier
+            modifier = modifier,
+            onOpenLyricsDialog = onOpenLyricsDialog,
+            onOpenQueue = onOpenQueue,
+            onQueueDragDelta = onQueueDragDelta,
+            onQueueDragEnd = onQueueDragEnd
         )
     }
 }
@@ -144,7 +202,11 @@ private fun ClassicControls(
     likedAt: Long?,
     setLikedAt: (Long?) -> Unit,
     playButtonRadius: Dp,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenLyricsDialog: (() -> Unit)? = null,
+    onOpenQueue: (() -> Unit)? = null,
+    onQueueDragDelta: ((Float) -> Unit)? = null,
+    onQueueDragEnd: ((Float) -> Unit)? = null
 ) = with(PlayerPreferences) {
     val (colorPalette) = LocalAppearance.current
 
@@ -154,169 +216,116 @@ private fun ClassicControls(
             .fillMaxWidth()
             .padding(horizontal = 32.dp)
     ) {
-        Spacer(modifier = Modifier.weight(1f))
+        // Título + artista
+        Spacer(modifier = Modifier.height(8.dp))
         MediaInfo(media)
-        Spacer(modifier = Modifier.weight(1f))
+
+    // Separación adicional debajo del nombre del artista para alejar la línea de tiempo
+    Spacer(modifier = Modifier.height(24.dp))
+    Spacer(modifier = Modifier.weight(1f))
+
+        // Barra de progreso
         SeekBar(
             binder = binder,
             position = position,
             media = media,
             alwaysShowDuration = true
         )
-        Spacer(modifier = Modifier.weight(1f))
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            IconButton(
-                icon = if (likedAt == null) R.drawable.heart_outline else R.drawable.heart,
-                color = colorPalette.favoritesIcon,
-                onClick = {
-                    setLikedAt(if (likedAt == null) System.currentTimeMillis() else null)
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .size(24.dp)
-            )
+    // Aumentar aún más el espacio entre la barra de progreso y los controles
+    Spacer(modifier = Modifier.height(24.dp))
 
-            IconButton(
-                icon = R.drawable.play_skip_back,
-                color = colorPalette.text,
-                onClick = binder.player::forceSeekToPrevious,
-                modifier = Modifier
-                    .weight(1f)
-                    .size(24.dp)
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Box(
-                modifier = Modifier
-                    .clip(playButtonRadius.roundedShape)
-                    .clickable {
-                        if (shouldBePlaying) binder.player.pause()
-                        else {
-                            if (binder.player.playbackState == Player.STATE_IDLE) binder.player.prepare()
-                            binder.player.play()
+        // Área desde botones de play hacia abajo: deslizar hacia arriba abre la cola
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .pointerInput(Unit) {
+                    val velocityTracker = VelocityTracker()
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { change, dragAmount ->
+                            velocityTracker.addPointerInputChange(change)
+                            // Pasar el delta al BottomSheet para que siga el dedo
+                            onQueueDragDelta?.invoke(dragAmount)
+                        },
+                        onDragEnd = {
+                            // Fling con la misma convención de signos que usa BottomSheet
+                            val vy = -velocityTracker.calculateVelocity().y
+                            onQueueDragEnd?.invoke(vy)
+                            velocityTracker.resetTracking()
+                        },
+                        onDragCancel = {
+                            velocityTracker.resetTracking()
                         }
-                    }
-                    .background(colorPalette.background2)
-                    .size(64.dp)
+                    )
+                }
+        ) {
+            // Fila de controles de reproducción (mantener estilo actual del botón play)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                AnimatedPlayPauseButton(
-                    playing = shouldBePlaying,
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .size(32.dp)
+                ControlIcon(
+                    iconId = R.drawable.play_skip_back,
+                    onClick = binder.player::forceSeekToPrevious
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                PlayButton(
+                    radius = playButtonRadius,
+                    shouldBePlaying = shouldBePlaying,
+                    modifier = Modifier.size(64.dp)
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                ControlIcon(
+                    iconId = R.drawable.play_skip_forward,
+                    onClick = binder.player::forceSeekToNext
                 )
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            // Bajar los 4 controles inferiores para que no queden pegados al botón de play
+            Spacer(modifier = Modifier.height(30.dp))
 
-            IconButton(
-                icon = R.drawable.play_skip_forward,
-                color = colorPalette.text,
-                onClick = binder.player::forceSeekToNext,
+            // Fila inferior: 4 botones centrados, sin fondo, con opacidad blanca al presionar
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly,
                 modifier = Modifier
-                    .weight(1f)
-                    .size(24.dp)
-            )
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                // 1) Repetir pista (loop)
+                ControlIcon(
+                    iconId = R.drawable.infinite,
+                    onClick = { trackLoopEnabled = !trackLoopEnabled },
+                    tint = if (trackLoopEnabled) colorPalette.accent else colorPalette.text
+                )
 
-            IconButton(
-                icon = R.drawable.infinite,
-                enabled = trackLoopEnabled,
-                onClick = { trackLoopEnabled = !trackLoopEnabled },
-                modifier = Modifier
-                    .weight(1f)
-                    .size(24.dp)
-            )
-        }
+                // 2) Descargar
+                DownloadControl(media = media)
 
-        Spacer(modifier = Modifier.weight(1f))
-    }
-}
+                // 3) Aleatorio (mezclar cola)
+                ControlIcon(
+                    iconId = R.drawable.shuffle,
+                    onClick = { binder.player.shuffleQueue() }
+                )
 
-@Composable
-private fun ModernControls(
-    media: UiMedia,
-    binder: PlayerService.Binder,
-    shouldBePlaying: Boolean,
-    position: Long,
-    likedAt: Long?,
-    setLikedAt: (Long?) -> Unit,
-    playButtonRadius: Dp,
-    modifier: Modifier = Modifier,
-    controlHeight: Dp = 64.dp
-) {
-    val previousButtonContent: @Composable RowScope.() -> Unit = {
-        SkipButton(
-            iconId = R.drawable.play_skip_back,
-            onClick = binder.player::forceSeekToPrevious,
-            modifier = Modifier.weight(1f),
-            offsetOnPress = -DefaultOffset
-        )
-    }
-
-    val likeButtonContent: @Composable RowScope.() -> Unit = {
-        BigIconButton(
-            iconId = if (likedAt == null) R.drawable.heart_outline else R.drawable.heart,
-            onClick = {
-                setLikedAt(if (likedAt == null) System.currentTimeMillis() else null)
-            },
-            modifier = Modifier.weight(1f)
-        )
-    }
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 32.dp)
-    ) {
-        Spacer(modifier = Modifier.weight(1f))
-        MediaInfo(media)
-        Spacer(modifier = Modifier.weight(1f))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Always show like or skip-back at left
-            if (PlayerPreferences.showLike) likeButtonContent() else previousButtonContent()
-
-            PlayButton(
-                radius = playButtonRadius,
-                shouldBePlaying = shouldBePlaying,
-                modifier = Modifier
-                    .height(controlHeight)
-                    .weight(4f)
-            )
-            SkipButton(
-                iconId = R.drawable.play_skip_forward,
-                onClick = binder.player::forceSeekToNext,
-                modifier = Modifier.weight(1f)
-            )
-        }
-        Spacer(modifier = Modifier.weight(1f))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                SeekBar(
-                    binder = binder,
-                    position = position,
-                    media = media
+                // 4) Abrir lista de reproducción (cola)
+                ControlIcon(
+                    iconId = R.drawable.ellipsis_horizontal,
+                    onClick = { onOpenQueue?.invoke() }
                 )
             }
-        }
 
-        Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.weight(1f))
+        }
     }
 }
 
+// ModernControls se unifica con ClassicControls para este rediseño
 @Composable
 private fun SkipButton(
     @DrawableRes iconId: Int,
@@ -384,13 +393,6 @@ private fun MediaInfo(media: UiMedia) {
     var artistInfo: List<Info>? by remember { mutableStateOf(null) }
     var maxHeight by rememberSaveable { mutableIntStateOf(0) }
 
-    // Check if song is downloaded
-    val isDownloaded = isDownloaded(media.id)
-    
-    // Get like state from database
-    val likedAt by Database.likedAt(media.id).collectAsState(initial = null)
-    val isLiked = likedAt != null
-
     LaunchedEffect(media) {
         withContext(Dispatchers.IO) {
             artistInfo = Database
@@ -400,97 +402,21 @@ private fun MediaInfo(media: UiMedia) {
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        // Título con botones de like y descarga
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        // Título centrado sin botones laterales
+        AnimatedContent(
+            targetState = media.title,
+            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            label = "",
             modifier = Modifier.fillMaxWidth()
-        ) {
-            // Botón de descarga (muestra check si ya está descargado)
-            IconButton(
-                icon = if (isDownloaded) R.drawable.check else R.drawable.download,
-                color = if (isDownloaded) Color(0xFF4CAF50) else colorPalette.text,
-                onClick = {
-                    if (!isDownloaded) {
-                        // Iniciar descarga usando la lógica simplificada
-                        val lifecycleOwner = context as? LifecycleOwner
-                        lifecycleOwner?.lifecycleScope?.launch {
-                            try {
-                                // Resolver la URL de streaming
-                                val videoId = media.id.removePrefix("https://youtube.com/watch?v=")
-                                val playerResponse = Innertube.player(
-                                    PlayerBody(videoId = videoId)
-                                )?.getOrNull()
-                                
-                                val streamingUrl = playerResponse?.streamingData?.adaptiveFormats
-                                    ?.filter { it.mimeType?.startsWith("audio/") == true }
-                                    ?.maxByOrNull { it.bitrate ?: 0 }
-                                    ?.url
-                                
-                                if (streamingUrl != null) {
-                                    MusicDownloadService.download(
-                                        context = context.applicationContext,
-                                        trackId = media.id,
-                                        title = media.title,
-                                        artist = media.artist,
-                                        album = null,
-                                        thumbnailUrl = null,
-                                        duration = null,
-                                        url = streamingUrl
-                                    )
-                                    
-                                    withContext(Dispatchers.Main) {
-                                        context.toast(context.getString(R.string.auto_download_started, media.title))
-                                    }
-                                } else {
-                                    withContext(Dispatchers.Main) {
-                                        context.toast("Unable to get download URL")
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                android.util.Log.e("MediaInfo", "Error starting download", e)
-                                withContext(Dispatchers.Main) {
-                                    context.toast("Download failed: ${e.message}")
-                                }
-                            }
-                        }
-                    }
-                },
-                modifier = Modifier.size(24.dp)
-            )
-            
-            // Título centrado
-            AnimatedContent(
-                targetState = media.title,
-                transitionSpec = { fadeIn() togetherWith fadeOut() },
-                label = "",
-                modifier = Modifier.weight(1f)
-            ) { title ->
-                FadingRow(modifier = Modifier.fillMaxWidth()) {
-                    BasicText(
-                        text = title,
-                        style = typography.l.bold.copy(textAlign = androidx.compose.ui.text.style.TextAlign.Center),
-                        maxLines = 1,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+        ) { title ->
+            FadingRow(modifier = Modifier.fillMaxWidth()) {
+                BasicText(
+                    text = title,
+                    style = typography.l.bold.copy(textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
-            
-            // Botón de like
-            IconButton(
-                icon = if (isLiked) R.drawable.heart else R.drawable.heart_outline,
-                color = if (isLiked) colorPalette.favoritesIcon else colorPalette.text,
-                onClick = {
-                    // Toggle like state
-                    scope.launch {
-                        Database.like(
-                            songId = media.id,
-                            likedAt = if (isLiked) null else System.currentTimeMillis()
-                        )
-                    }
-                },
-                modifier = Modifier.size(24.dp)
-            )
         }
 
         AnimatedContent(
@@ -554,4 +480,60 @@ private fun MediaInfo(media: UiMedia) {
             }
         }
     }
+}
+
+@Composable
+private fun DownloadControl(media: UiMedia) {
+    val (colorPalette) = LocalAppearance.current
+    val context = LocalContext.current
+    val isDownloaded = isDownloaded(media.id)
+
+    ControlIcon(
+        iconId = if (isDownloaded) R.drawable.check else R.drawable.download,
+        tint = if (isDownloaded) Color(0xFF4CAF50) else colorPalette.text,
+        onClick = {
+            if (!isDownloaded) {
+                val lifecycleOwner = context as? LifecycleOwner
+                lifecycleOwner?.lifecycleScope?.launch {
+                    try {
+                        val videoId = media.id.removePrefix("https://youtube.com/watch?v=")
+                        val playerResponse = Innertube.player(
+                            PlayerBody(videoId = videoId)
+                        )?.getOrNull()
+
+                        val streamingUrl = playerResponse?.streamingData?.adaptiveFormats
+                            ?.filter { it.mimeType?.startsWith("audio/") == true }
+                            ?.maxByOrNull { it.bitrate ?: 0 }
+                            ?.url
+
+                        if (streamingUrl != null) {
+                            MusicDownloadService.download(
+                                context = context.applicationContext,
+                                trackId = media.id,
+                                title = media.title,
+                                artist = media.artist,
+                                album = null,
+                                thumbnailUrl = null,
+                                duration = null,
+                                url = streamingUrl
+                            )
+
+                            withContext(Dispatchers.Main) {
+                                context.toast(context.getString(R.string.auto_download_started, media.title))
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                context.toast("Unable to get download URL")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("DownloadControl", "Error starting download", e)
+                        withContext(Dispatchers.Main) {
+                            context.toast("Download failed: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
+    )
 }

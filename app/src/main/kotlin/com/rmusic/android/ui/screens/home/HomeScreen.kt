@@ -36,6 +36,8 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.layout.onGloballyPositioned
 import coil3.compose.AsyncImage
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.animation.animateColorAsState
@@ -60,6 +62,8 @@ import com.rmusic.android.ui.screens.moodRoute
 import com.rmusic.android.ui.screens.pipedPlaylistRoute
 import com.rmusic.android.ui.screens.playlistRoute
 import com.rmusic.android.ui.screens.searchResultRoute
+import com.rmusic.android.ui.screens.settingsRoute
+import com.rmusic.compose.routing.OnGlobalRoute
 import com.rmusic.android.ui.screens.settingsRoute
 import com.rmusic.android.LocalPlayerAwareWindowInsets
 import com.rmusic.android.LocalPlayerServiceBinder
@@ -90,7 +94,9 @@ private val moreAlbumsRoute = Route0("moreAlbumsRoute")
 
 @Route
 @Composable
-fun HomeScreen() {
+fun HomeScreen(
+    onBottomBarHeightChange: (Dp) -> Unit = {}
+) {
     val saveableStateHolder = rememberSaveableStateHolder()
 
     PersistMapCleanup("home/")
@@ -171,7 +177,7 @@ fun HomeScreen() {
                         modifier = Modifier
                             .size(32.dp)
                             .clip(CircleShape)
-                            .clickable { settingsRoute() }
+                            .clickable { settingsRoute.global() }
                             .padding(4.dp)
                     )
                     Spacer(Modifier.weight(1f))
@@ -290,23 +296,31 @@ fun HomeScreen() {
                     }
                 }
 
-        // Bottom Navigation Bar (offset upward if mini player is showing)
-                val density = LocalDensity.current
-                val navBarBottomInset = with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
-        val navOffset = if (hasMedia) -Dimensions.items.collapsedPlayerHeight else 0.dp
+    // Bottom Navigation Bar fija (oculta en Settings o cuando el player está expandido)
+    val density = LocalDensity.current
+        val navBarBottomInset = with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
         val navBarColor = colorPalette.background0
+        val navExtraGap = 6.dp
+        val hideBottomBar = remember { mutableStateOf(false) }
+        OnGlobalRoute { (route, _) ->
+            hideBottomBar.value = route == settingsRoute
+        }
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .offset(y = navOffset)
-                .background(navBarColor)
-                .zIndex(2f)
-        ) {
-            Row(
+        modifier = Modifier
+        .fillMaxWidth()
+                .onGloballyPositioned { coords ->
+                    onBottomBarHeightChange(with(density) { coords.size.height.toDp() })
+                }
+    .height(Dimensions.items.bottomNavigationHeight + navExtraGap)
+    .background(navBarColor)
+        .zIndex(3f)
+    ) {
+            if (!hideBottomBar.value) Row(
                 modifier = Modifier
+            .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .height(Dimensions.items.bottomNavigationHeight)
-                    .padding(horizontal = 4.dp),
+            .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                     @Composable
