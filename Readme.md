@@ -36,7 +36,7 @@ Una aplicación de música para Android que reúne lo mejor de varias fuentes p�
 
 ## Créditos y agradecimientos
 - **CryingHaru** – Soporte de RMusic
-- **Huizengek** – Coautor de ViTune, el proyecto original que inspiró la base técnica y conceptual de RMusic.
+- **Huizengek** – Autor de Vitune basado en vimusic
 - **vfsfitvnm** – Autor de vimusic  en la cual esta basada el proyecto Vitune
 RMusic se construye sobre los cimientos de ViTune y evoluciona gracias a la comunidad. Si quieres colaborar, revisa los issues abiertos, consulta las instrucciones de contribución y comparte tus ideas.
 
