@@ -358,6 +358,7 @@
     <string name="quick_picks_source">Quick Picks Source</string>
     <string name="quick_picks_cache">Cache quick picks data</string>
     <string name="quick_picks_cache_description">Saves the quick picks data to disk for offline access</string>
+    <string name="quick_picks_disabled_low_spec">Quick picks are disabled to improve performance on this device.</string>
     <string name="player_layout">Player layout</string>
     <string name="classic_player_layout_name">Classic</string>
     <string name="new_player_layout_name">Modern (new)</string>
@@ -471,9 +472,9 @@
     <string name="preparing_downloads">Preparing downloads...</string>
     
     <!-- YouTube Music Authentication -->
-    <string name="ytmusic_auth">YouTube Music Auth</string>
-    <string name="ytmusic_authentication">YouTube Music Authentication</string>
-    <string name="ytmusic_auth_description">Authenticate with YouTube Music for full access</string>
+    <string name="intermusic_auth">Intermusic Auth</string>
+    <string name="intermusic_authentication">Intermusic Authentication</string>
+    <string name="intermusic_auth_description">Authenticate with Intermusic for full access</string>
     <string name="start_authentication">Start Authentication</string>
     <string name="re_authenticate">Re-authenticate</string>
     <string name="logout">Logout</string>
@@ -487,5 +488,5 @@
     <string name="unexpected_error">Unexpected error: %1$s</string>
     <string name="session_closed_successfully">Session closed successfully</string>
     <string name="auth_instructions">Instructions</string>
-    <string name="auth_instructions_text">• Click on \'Start Authentication\'\n• YouTube Music will open in the internal browser\n• Sign in with your Google account\n• Once authenticated, the window will close automatically\n• Cookies will be saved for future sessions</string>
+    <string name="auth_instructions_text">• Click on \'Start Authentication\'\n• Intermusic will open a YouTube Music sign-in page\n• Sign in with your Google account\n• Once authenticated, the window will close automatically\n• Cookies will be saved for future sessions</string>
 </resources>

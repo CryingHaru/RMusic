@@ -77,10 +77,16 @@ interface Database {
     @RewriteQueriesToDropUnusedColumns
     fun songsByRowIdAsc(): Flow<List<Song>>
 
+    @Query("SELECT * FROM Song WHERE id = :id LIMIT 1")
+    suspend fun songById(id: String): Song?
+
     // Downloaded songs queries
     @Transaction
     @Query("SELECT * FROM DownloadedSong ORDER BY downloadedAt DESC")
     fun downloadedSongs(): Flow<List<DownloadedSong>>
+
+    @Query("SELECT * FROM DownloadedSong WHERE id = :id LIMIT 1")
+    suspend fun downloadedSongById(id: String): DownloadedSong?
 
     @Transaction
     @Query("SELECT DISTINCT artistsText FROM DownloadedSong WHERE artistsText IS NOT NULL ORDER BY artistsText")
@@ -424,7 +430,7 @@ interface Database {
         ORDER BY SortedSongPlaylistMap.position
         """
     )
-    fun playlistSongs(id: Long): Flow<List<Song>?>
+    fun playlistSongs(id: Long): Flow<List<Song>>
 
     @Transaction
     @Query("SELECT * FROM Playlist WHERE id = :id")
@@ -508,12 +514,12 @@ interface Database {
         """
         SELECT thumbnailUrl FROM Song
         JOIN SongPlaylistMap ON id = songId
-        WHERE playlistId = :id
+        WHERE playlistId = :id AND thumbnailUrl IS NOT NULL
         ORDER BY position
         LIMIT 4
         """
     )
-    fun playlistThumbnailUrls(id: Long): Flow<List<String?>>
+    fun playlistThumbnailUrls(id: Long): Flow<List<String>>
 
     @Transaction
     @Query(

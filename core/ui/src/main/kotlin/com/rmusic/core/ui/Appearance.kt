@@ -23,13 +23,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.parcelize.IgnoredOnParcel
 import kotlinx.parcelize.Parcelize
+import kotlinx.parcelize.TypeParceler
 
 @Parcelize
+@TypeParceler<Dp, DpParceler>
 @Immutable
 data class Appearance(
     val colorPalette: ColorPalette,
     val typography: Typography,
-    val thumbnailShapeCorners: ParcelableDp
+    val thumbnailShapeCorners: Dp
 ) : Parcelable {
     @IgnoredOnParcel
     val thumbnailShape = thumbnailShapeCorners.roundedShape
@@ -98,6 +100,7 @@ fun appearance(
     }.value
 }
 
+@Suppress("DEPRECATION")
 fun Activity.setSystemBarAppearance(isDark: Boolean) {
     with(WindowCompat.getInsetsController(window, window.decorView.rootView)) {
         isAppearanceLightStatusBars = !isDark
@@ -106,11 +109,13 @@ fun Activity.setSystemBarAppearance(isDark: Boolean) {
 
     val color = (if (isDark) Color.Transparent else Color.Black.copy(alpha = 0.2f)).toArgb()
 
-    // TODO: Android now expects a background behind the system bars as well
-    @Suppress("DEPRECATION")
-    if (!isAtLeastAndroid6) window.statusBarColor = color
-    @Suppress("DEPRECATION")
-    if (!isAtLeastAndroid8) window.navigationBarColor = color
+    // Ensure system bars have a background color on modern Android versions.
+    // Android expects a non-transparent background behind the system bars when
+    // using appearance flags (light/dark). Set a suitable color on modern
+    // platforms so the system draws the bars correctly.
+    // Android 14+ deprecates these setters, yet they remain the only way to tint bars on older releases.
+    if (isAtLeastAndroid6) window.statusBarColor = color
+    if (isAtLeastAndroid8) window.navigationBarColor = color
 }
 
 @Composable

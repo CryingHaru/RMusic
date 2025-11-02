@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.IBinder
 import android.service.media.MediaBrowserService
+import android.util.Log
 import androidx.annotation.DrawableRes
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
@@ -34,8 +35,9 @@ import kotlinx.coroutines.flow.cancellable
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import android.media.MediaDescription as BrowserMediaDescription
 import android.media.browse.MediaBrowser.MediaItem as BrowserMediaItem
@@ -50,8 +52,12 @@ class PlayerMediaBrowserService : MediaBrowserService(), ServiceConnection {
         CallValidator(applicationContext, R.xml.allowed_media_browser_callers)
     }
 
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     override fun onDestroy() {
         if (bound) unbindService(this)
+        serviceScope.cancel()
+        coroutineScope.cancel()
         super.onDestroy()
     }
 
@@ -79,49 +85,56 @@ class PlayerMediaBrowserService : MediaBrowserService(), ServiceConnection {
     override fun onLoadChildren(
         parentId: String,
         result: Result<MutableList<BrowserMediaItem>>
-    ) = runBlocking(Dispatchers.IO) {
-        result.sendResult(
-            when (MediaId(parentId)) {
-                MediaId.ROOT -> mutableListOf(
-                    songsBrowserMediaItem,
-                    playlistsBrowserMediaItem,
-                    albumsBrowserMediaItem
-                )
+    ) {
+        result.detach()
+        serviceScope.launch {
+            val items = runCatching {
+                when (MediaId(parentId)) {
+                    MediaId.ROOT -> mutableListOf(
+                        songsBrowserMediaItem,
+                        playlistsBrowserMediaItem,
+                        albumsBrowserMediaItem
+                    )
 
-                MediaId.SONGS ->
-                    Database
-                        .songsByPlayTimeDesc(limit = 30)
-                        .first()
-                        .also { lastSongs = it }
-                        .map { it.asBrowserMediaItem }
-                        .toMutableList()
-                        .apply {
-                            if (isNotEmpty()) add(0, shuffleBrowserMediaItem)
-                        }
+                    MediaId.SONGS ->
+                        Database
+                            .songsByPlayTimeDesc(limit = 30)
+                            .first()
+                            .also { lastSongs = it }
+                            .map { it.asBrowserMediaItem }
+                            .toMutableList()
+                            .apply {
+                                if (isNotEmpty()) add(0, shuffleBrowserMediaItem)
+                            }
 
-                MediaId.PLAYLISTS ->
-                    Database
-                        .playlistPreviewsByDateAddedDesc()
-                        .first()
-                        .map { it.asBrowserMediaItem }
-                        .toMutableList()
-                        .apply {
-                            add(0, favoritesBrowserMediaItem)
-                            add(1, offlineBrowserMediaItem)
-                            add(2, topBrowserMediaItem)
-                            add(3, localBrowserMediaItem)
-                        }
+                    MediaId.PLAYLISTS ->
+                        Database
+                            .playlistPreviewsByDateAddedDesc()
+                            .first()
+                            .map { it.asBrowserMediaItem }
+                            .toMutableList()
+                            .apply {
+                                add(0, favoritesBrowserMediaItem)
+                                add(1, offlineBrowserMediaItem)
+                                add(2, topBrowserMediaItem)
+                                add(3, localBrowserMediaItem)
+                            }
 
-                MediaId.ALBUMS ->
-                    Database
-                        .albumsByRowIdDesc()
-                        .first()
-                        .map { it.asBrowserMediaItem }
-                        .toMutableList()
+                    MediaId.ALBUMS ->
+                        Database
+                            .albumsByRowIdDesc()
+                            .first()
+                            .map { it.asBrowserMediaItem }
+                            .toMutableList()
 
-                else -> mutableListOf()
-            }
-        )
+                    else -> mutableListOf()
+                }
+            }.onFailure { throwable ->
+                Log.e(TAG, "Failed to load children for $parentId", throwable)
+            }.getOrElse { mutableListOf() }
+
+            result.sendResult(items)
+        }
     }
 
     private fun uriFor(@DrawableRes id: Int) = Uri.Builder()
@@ -349,6 +362,10 @@ class PlayerMediaBrowserService : MediaBrowserService(), ServiceConnection {
                 }
             }
         }
+    }
+
+    companion object {
+        private const val TAG = "PlayerMediaBrowserSvc"
     }
 
     @JvmInline

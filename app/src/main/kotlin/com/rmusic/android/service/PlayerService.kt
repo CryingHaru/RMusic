@@ -21,6 +21,7 @@ import android.media.session.PlaybackState
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
+import android.os.Looper
 import android.os.StatFs
 import android.os.SystemClock
 import android.provider.MediaStore
@@ -93,6 +94,7 @@ import com.rmusic.android.service.RestrictedVideoException
 import com.rmusic.android.transaction
 import com.rmusic.android.utils.ActionReceiver
 import com.rmusic.android.utils.ConditionalCacheDataSourceFactory
+import com.rmusic.android.utils.DeviceConstraints
 import com.rmusic.android.utils.GlyphInterface
 import com.rmusic.android.utils.InvincibleService
 import com.rmusic.android.utils.TimerJob
@@ -143,7 +145,7 @@ import com.rmusic.providers.sponsorblock.SponsorBlock
 import com.rmusic.providers.sponsorblock.models.Action
 import com.rmusic.providers.sponsorblock.models.Category
 import com.rmusic.providers.sponsorblock.requests.segments
-import com.rmusic.providers.ytmusic.YTMusicProvider
+import com.rmusic.providers.intermusic.IntermusicProvider
 import io.ktor.client.plugins.ClientRequestException
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -181,6 +183,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlinx.datetime.Clock
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -202,9 +205,31 @@ private const val LOOP_ACTION = "LOOP"
 @Suppress("LargeClass", "TooManyFunctions") // intended in this class: it is a service
 @OptIn(UnstableApi::class)
 class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListener.Callback {
-    private lateinit var mediaSession: MediaSession
-    private lateinit var cache: Cache
-    private lateinit var player: ExoPlayer
+    private lateinit var mediaSessionInternal: MediaSession
+    private lateinit var cacheInternal: Cache
+    private lateinit var playerInternal: ExoPlayer
+    private val initLock = Any()
+
+    @Volatile
+    private var isPlayerStackInitialized = false
+
+    private val mediaSession: MediaSession
+        get() {
+            ensurePlayerStackInitialized()
+            return mediaSessionInternal
+        }
+
+    private val cache: Cache
+        get() {
+            ensurePlayerStackInitialized()
+            return cacheInternal
+        }
+
+    private val player: ExoPlayer
+        get() {
+            ensurePlayerStackInitialized()
+            return playerInternal
+        }
 
     /**
      * Sistema de caché temporal inteligente
@@ -319,9 +344,9 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
     private val binder = Binder()
 
-    // Track last stream provider for debug UI ("Innertube" or "YTMusic")
-    private val lastProviderSource = MutableStateFlow("YTMusic")
-    private val ytMusicProvider by lazy { YTMusicProvider.shared() }
+    // Track last stream provider for debug UI ("Innertube" or "Intermusic")
+    private val lastProviderSource = MutableStateFlow("Intermusic")
+    private val intermusicProvider by lazy { IntermusicProvider.shared() }
 
     private var isNotificationStarted = false
     override val notificationId get() = ServiceNotifications.default.notificationId!!
@@ -366,7 +391,6 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         return binder
     }
 
-    @Suppress("CyclomaticComplexMethod")
     override fun onCreate() {
         super.onCreate()
 
@@ -384,16 +408,46 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             }
         )
 
-        cache = createCache(this)
-        player = ExoPlayer.Builder(this, createRendersFactory(), createMediaSourceFactory())
+        isInvincibilityEnabled = PlayerPreferences.isInvincibilityEnabled
+    }
+
+    private fun ensurePlayerStackInitialized() {
+        if (isPlayerStackInitialized) return
+
+        if (handler.looper.thread !== Thread.currentThread()) {
+            val latch = CountDownLatch(1)
+            handler.post {
+                try {
+                    ensurePlayerStackInitialized()
+                } finally {
+                    latch.countDown()
+                }
+            }
+            try {
+                latch.await()
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            return
+        }
+
+        synchronized(initLock) {
+            if (isPlayerStackInitialized) return
+            initializePlayerStackOnMain()
+        }
+    }
+
+    private fun initializePlayerStackOnMain() {
+        cacheInternal = createCache(this)
+        playerInternal = ExoPlayer.Builder(this, createRendersFactory(), createMediaSourceFactory(cacheInternal))
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .setAudioAttributes(
-                /* audioAttributes = */ AudioAttributes.Builder()
+                AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build(),
-                /* handleAudioFocus = */ PlayerPreferences.handleAudioFocus
+                PlayerPreferences.handleAudioFocus
             )
             .setUsePlatformDiagnostics(false)
             .build()
@@ -408,20 +462,24 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                 )
             }
 
-        updateRepeatMode()
-        maybeRestorePlayerQueue()
+        playerInternal.repeatMode = when {
+            PlayerPreferences.trackLoopEnabled -> Player.REPEAT_MODE_ONE
+            PlayerPreferences.queueLoopEnabled -> Player.REPEAT_MODE_ALL
+            else -> Player.REPEAT_MODE_OFF
+        }
 
-        mediaSession = MediaSession(baseContext, TAG).apply {
+        mediaSessionInternal = MediaSession(baseContext, TAG).apply {
             setCallback(SessionCallback())
             setPlaybackState(stateBuilder.build())
             setSessionActivity(activityPendingIntent<MainActivity>())
             isActive = true
         }
 
+        isPlayerStackInitialized = true
+
         coroutineScope.launch {
             var first = true
             combine(mediaItemState, isLikedState) { mediaItem, _ ->
-                // work around NPE in other processes
                 if (first) {
                     first = false
                     return@combine
@@ -435,6 +493,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             }.collect()
         }
 
+        maybeRestorePlayerQueue()
         maybeResumePlaybackWhenDeviceConnected()
 
         preferenceUpdaterJob = coroutineScope.launch {
@@ -471,26 +530,29 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             subscribe(PlayerPreferences.volumeNormalizationBaseGainProperty) { maybeNormalizeVolume() }
             subscribe(PlayerPreferences.volumeNormalizationProperty) { maybeNormalizeVolume() }
             subscribe(PlayerPreferences.sponsorBlockEnabledProperty) { maybeSponsorBlock() }
-            subscribe(PlayerPreferences.autoDownloadAtHalfProperty) { 
-                // Reset tracked songs when preference changes
+            subscribe(PlayerPreferences.autoDownloadAtHalfProperty) {
                 if (!it) autoDownloadedSongs.clear()
             }
 
-            // Auto-download monitoring - check progress every second when enabled
             launch {
                 while (isActive) {
-                    // Only check auto-download if the preference is enabled
-                    if (PlayerPreferences.autoDownloadAtHalf) {
-                        try {
-                            maybeAutoDownload()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error in auto-download check", e)
-                        }
-                        // Check every second when enabled
-                        delay(1000)
+                    val autoDownloadsEnabled = PlayerPreferences.autoDownloadAtHalf
+                    val playbackSnapshot = withContext(Dispatchers.Main) {
+                        Triple(
+                            player.shouldBePlaying,
+                            player.currentMediaItem?.mediaId,
+                            player.duration
+                        )
+                    }
+                    val (isActivelyPlaying, currentMediaId, _) = playbackSnapshot
+
+                    if (autoDownloadsEnabled && isActivelyPlaying && currentMediaId != null) {
+                        runCatching { maybeAutoDownload() }
+                            .onFailure { Log.e(TAG, "Error in auto-download check", it) }
+
+                        delay(5_000)
                     } else {
-                        // Check every 30 seconds when disabled to save resources
-                        delay(30000)
+                        delay(if (autoDownloadsEnabled) 10_000 else 60_000)
                     }
                 }
             }
@@ -502,7 +564,6 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                 val min = when {
                     audioManager == null -> 0
                     isAtLeastAndroid9 -> audioManager.getStreamMinVolume(stream)
-
                     else -> 0
                 }
 
@@ -514,7 +575,9 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     }
 
     private fun updateRepeatMode() {
-        player.repeatMode = when {
+        if (!isPlayerStackInitialized) return
+
+        playerInternal.repeatMode = when {
             PlayerPreferences.trackLoopEnabled -> Player.REPEAT_MODE_ONE
             PlayerPreferences.queueLoopEnabled -> Player.REPEAT_MODE_ALL
             else -> Player.REPEAT_MODE_OFF
@@ -522,6 +585,11 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     }
 
       override fun onTaskRemoved(rootIntent: Intent?) {
+        if (!isPlayerStackInitialized) {
+            super.onTaskRemoved(rootIntent)
+            return
+        }
+
         if (!player.shouldBePlaying || PlayerPreferences.stopWhenClosed)
             broadcastPendingIntent<NotificationDismissReceiver>().send()
         super.onTaskRemoved(rootIntent)
@@ -532,27 +600,32 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
     override fun onDestroy() {
         runCatching {
-            maybeSavePlayerQueue()
+            if (isPlayerStackInitialized) {
+                maybeSavePlayerQueue()
 
-            // Limpiar sistema de reproducción inteligente
-            currentRetryJob?.cancel()
-            retryAttempts.clear()
+                currentRetryJob?.cancel()
+                retryAttempts.clear()
 
-            // Limpiar caché temporal al cerrar
-            temporalCache.clearAll(cache)
+                temporalCache.clearAll(cacheInternal)
 
-            player.removeListener(this)
-            player.stop()
-            player.release()
+                playerInternal.removeListener(this)
+                playerInternal.stop()
+                playerInternal.release()
+
+                mediaSessionInternal.isActive = false
+                mediaSessionInternal.release()
+                cacheInternal.release()
+            }
 
             unregisterReceiver(notificationActionReceiver)
 
-            mediaSession.isActive = false
-            mediaSession.release()
-            cache.release()
+            audioManager?.unregisterAudioDeviceCallback(audioDeviceCallback)
+            audioDeviceCallback = null
 
             loudnessEnhancer?.release()
             preferenceUpdaterJob?.cancel()
+            volumeNormalizationJob?.cancel()
+            sponsorBlockJob?.cancel()
 
             coroutineScope.cancel()
             glyphInterface.close()
@@ -561,11 +634,12 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         super.onDestroy()
     }
 
-    override fun shouldBeInvincible() = !player.shouldBePlaying
+    override fun shouldBeInvincible() = isPlayerStackInitialized && !playerInternal.shouldBePlaying
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         handler.post {
-            if (!bitmapProvider.setDefaultBitmap() || player.currentMediaItem == null) return@post
+            if (!isPlayerStackInitialized) return@post
+            if (!bitmapProvider.setDefaultBitmap() || playerInternal.currentMediaItem == null) return@post
             updateNotification()
         }
 
@@ -1494,7 +1568,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                         try {
                             // Check if already downloaded
                             val existingDownload = runCatching {
-                                Database.downloadedSongs().first().find { it.id == "download:$mediaId" }
+                                Database.downloadedSongById("download:$mediaId")
                             }.getOrNull()
                             
                             if (existingDownload != null) {
@@ -1502,16 +1576,16 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                                 return@launch
                             }
                             
-                            // Get streaming URL for download (prefer YTMusic provider when logged in)
+                            // Get streaming URL for download (prefer Intermusic provider when logged in)
                             showDebugNotification("Resolviendo URL: $title")
                             var streamingUrl: String? = null
                             try {
-                                val ytProvider = YTMusicProvider.shared()
-                                val best = ytProvider.getBestAudioStream(mediaId).getOrNull()
+                                val interProvider = IntermusicProvider.shared()
+                                val best = interProvider.getBestAudioStream(mediaId).getOrNull()
                                 streamingUrl = best?.url
                                 if (streamingUrl != null) {
-                                    lastProviderSource.value = "YTMusic"
-                                    showDebugNotification("URL vía YTMusic")
+                                    lastProviderSource.value = "Intermusic"
+                                    showDebugNotification("URL vía Intermusic")
                                 }
                             } catch (ignored: Exception) {
                                 // Ignore and fallback
@@ -1627,6 +1701,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
     private fun maybeResumePlaybackWhenDeviceConnected() {
         if (!isAtLeastAndroid6) return
+        if (!isPlayerStackInitialized) return
 
         if (!PlayerPreferences.resumePlaybackWhenDeviceConnected) {
             audioManager?.unregisterAudioDeviceCallback(audioDeviceCallback)
@@ -1758,6 +1833,8 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     }
 
     private fun notification(): (NotificationCompat.Builder.() -> NotificationCompat.Builder)? {
+        if (!isPlayerStackInitialized) return null
+
         if (player.currentMediaItem == null) return null
 
         val mediaMetadata = player.mediaMetadata
@@ -1827,17 +1904,21 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     }
 
     private fun updateNotification() = runCatching {
+        if (!isPlayerStackInitialized) return@runCatching
+
         handler.post {
             notification()?.let { ServiceNotifications.default.sendNotification(this, it) }
         }
     }
 
     override fun startForeground() {
+        if (!isPlayerStackInitialized) return
+
         notification()
             ?.let { ServiceNotifications.default.startForeground(this, it) }
     }
 
-    private fun createMediaSourceFactory() = DefaultMediaSourceFactory(
+    private fun createMediaSourceFactory(resolvedCache: Cache) = DefaultMediaSourceFactory(
         /* dataSourceFactory = */ createYouTubeDataSourceResolverFactory(
             findMediaItem = { videoId ->
                 withContext(Dispatchers.Main) {
@@ -1845,7 +1926,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                 }
             },
             context = applicationContext,
-            cache = cache,
+            cache = resolvedCache,
             onProviderUsed = { source -> lastProviderSource.value = source }
         ),
         /* extractorsFactory = */ DefaultExtractorsFactory()
@@ -2112,13 +2193,22 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             directoryName: String = DEFAULT_CACHE_DIRECTORY,
             size: ExoPlayerDiskCacheSize = DataPreferences.exoPlayerDiskCacheMaxSize
         ) = with(context) {
-            val cacheEvictor = when (size) {
+            val effectiveSize = if (DeviceConstraints.disableDiskCache && size.bytes > ExoPlayerDiskCacheSize.`128MB`.bytes) {
+                ExoPlayerDiskCacheSize.`128MB`
+            } else size
+
+            val cacheEvictor = when (effectiveSize) {
                 ExoPlayerDiskCacheSize.Unlimited -> NoOpCacheEvictor()
-                else -> LeastRecentlyUsedCacheEvictor(size.bytes)
+                else -> LeastRecentlyUsedCacheEvictor(effectiveSize.bytes)
             }
 
             val directory = cacheDir.resolve(directoryName).apply {
                 if (!exists()) mkdir()
+            }
+
+            if (DeviceConstraints.disableDiskCache) {
+                runCatching { directory.deleteRecursively() }
+                runCatching { directory.mkdirs() }
             }
 
             SimpleCache(directory, cacheEvictor, createDatabaseProvider(context))
@@ -2229,7 +2319,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             // Check for downloaded files
             if (mediaId.startsWith("download:")) {
                 val downloadedSong = runBlocking(Dispatchers.IO) {
-                    Database.downloadedSongs().first().find { it.id == mediaId }
+                    Database.downloadedSongById(mediaId)
                 }
                 
                 if (downloadedSong != null && File(downloadedSong.filePath).exists()) {
@@ -2260,33 +2350,33 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                     .withUri(cachedUri.uri)
                     .withYouTubeRange(null, null, cachedUri.meta, /* useSegmentation = */ true)
             } ?: run {
-                // Priorizar YTMusic como proveedor primario (sin requerir login) con orden Oculus > iOS > Android,
+                // Priorizar Intermusic como proveedor primario (sin requerir login) con orden Oculus > iOS > Android,
                 // validando SIEMPRE que la URL responde 200/206 antes de usarla.
                 run {
-                    val ytProvider = YTMusicProvider.shared()
+                    val interProvider = IntermusicProvider.shared()
                     val clients = listOf(
-                        YTMusicProvider.YTClient.OCULUS to "Oculus",
-                        YTMusicProvider.YTClient.IOS to "iOS",
-                        YTMusicProvider.YTClient.ANDROID to "Android"
+                        IntermusicProvider.ClientProfile.OCULUS to "Oculus",
+                        IntermusicProvider.ClientProfile.IOS to "iOS",
+                        IntermusicProvider.ClientProfile.ANDROID to "Android"
                     )
 
                     var chosenUrl: String? = null
-                    var chosenBest: com.rmusic.providers.ytmusic.YTMusicProvider.AudioStreamInfo? = null
+                    var chosenBest: com.rmusic.providers.intermusic.IntermusicProvider.AudioStreamInfo? = null
                     var chosenClientLabel: String? = null
 
                     for ((client, label) in clients) {
-                        Log.d(TAG, "Resolver:YTMusic trying $label for $mediaId …")
+                        Log.d(TAG, "Resolver:Intermusic trying $label for $mediaId …")
                         val best = runBlocking(Dispatchers.IO) {
-                            ytProvider.getBestAudioStream(mediaId, client).getOrNull()
+                            interProvider.getBestAudioStream(mediaId, client).getOrNull()
                         }
                         var directUrl = best?.url
                         if (directUrl == null) {
                             val fetchedUrl = runBlocking(Dispatchers.IO) {
-                                ytProvider.getStreamUrl(mediaId, client).getOrNull()
+                                interProvider.getStreamUrl(mediaId, client).getOrNull()
                             }
                             if (BuildConfig.DEBUG) {
                                 val preview = fetchedUrl?.let { if (it.length > 120) it.substring(0, 120) + "…" else it }
-                                Log.d(TAG, "YTMusic.getStreamUrl($mediaId) [$label] -> ${preview ?: "null"}")
+                                Log.d(TAG, "Intermusic.getStreamUrl($mediaId) [$label] -> ${preview ?: "null"}")
                             }
                             directUrl = fetchedUrl
                         }
@@ -2294,7 +2384,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                         if (directUrl != null) {
                             // Validar con HEAD 200/206 antes de usar
                             val ok = runBlocking(Dispatchers.IO) {
-                                ytProvider.testUrlAccess(directUrl!!).getOrDefault(false)
+                                interProvider.testUrlAccess(directUrl!!).getOrDefault(false)
                             }
                             if (ok) {
                                 chosenUrl = directUrl
@@ -2302,19 +2392,19 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                                 chosenClientLabel = label
                                 break
                             } else {
-                                Log.w(TAG, "Resolver:YTMusic URL not accessible (no 200/206) for $label -> skipping")
+                                Log.w(TAG, "Resolver:Intermusic URL not accessible (no 200/206) for $label -> skipping")
                             }
                         }
                     }
 
                     if (chosenUrl != null) {
-                        Log.d(TAG, "Resolver:YTMusic resolved -> $chosenUrl")
-                        onProviderUsed(if (BuildConfig.DEBUG) "YTMusic ($chosenClientLabel)" else "YTMusic")
+                        Log.d(TAG, "Resolver:Intermusic resolved -> $chosenUrl")
+                        onProviderUsed(if (BuildConfig.DEBUG) "Intermusic ($chosenClientLabel)" else "Intermusic")
 
                         // Determinar Content-Length y soporte de rangos
-                        val contentLen = runBlocking(Dispatchers.IO) { ytProvider.headContentLength(chosenUrl!!).getOrNull() }
+                        val contentLen = runBlocking(Dispatchers.IO) { interProvider.headContentLength(chosenUrl!!).getOrNull() }
                         val supportsRanges = contentLen?.let { len ->
-                            runBlocking(Dispatchers.IO) { ytProvider.supportsByteRanges(chosenUrl!!, len).getOrDefault(false) }
+                            runBlocking(Dispatchers.IO) { interProvider.supportsByteRanges(chosenUrl!!, len).getOrDefault(false) }
                         } ?: true // asumir true si no se pudo determinar
 
                         // Persistir información básica del formato si está disponible
@@ -2380,10 +2470,11 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }.handleRangeErrors().withFallback(context) { dataSpec ->
             val id = dataSpec.key ?: error("No id found for resolving an alternative song")
             val alternativeSong = runBlocking(Dispatchers.IO) {
-                Database
-                    .localSongsByRowIdDesc()
-                    .first()
-                    .find { id in it.title }
+                Database.songById(id)
+                    ?: Database
+                        .localSongsByRowIdDesc()
+                        .first()
+                        .find { id in it.title }
             } ?: error("No alternative song found")
 
             dataSpec.buildUpon()

@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
@@ -30,7 +31,7 @@ import com.rmusic.android.ui.components.themed.SecondaryTextButton
 import com.rmusic.android.ui.screens.Route
 import com.rmusic.core.data.enums.CoilDiskCacheSize
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -38,6 +39,7 @@ import java.io.File
 @Composable
 fun DownloadSettings() = with(DataPreferences) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val binder = LocalPlayerServiceBinder.current
     val imageCache = remember(context) { context.imageLoader.diskCache }
 
@@ -113,7 +115,7 @@ fun DownloadSettings() = with(DataPreferences) {
                         text = stringResource(R.string.clear_all),
                         onClick = {
                             // Clear all downloads
-                            runBlocking {
+                            scope.launch {
                                 withContext(Dispatchers.IO) {
                                     // Get all downloaded songs and delete their files
                                     val downloadedSongs = Database.downloadedSongs()

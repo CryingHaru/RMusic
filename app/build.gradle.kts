@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.parcelize)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
 
@@ -36,10 +37,35 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("../rmusic-release-key.keystore")
-            storePassword = System.getenv("RMUSIC_KEYSTORE_PASSWORD") ?: "LuckyLess1"
-            keyAlias = System.getenv("RMUSIC_KEY_ALIAS") ?: "cryingharu"
-            keyPassword = System.getenv("RMUSIC_KEY_PASSWORD") ?: "LuckyLess1"
+            storeFile = System.getenv("RMUSIC_KEYSTORE")?.let { file(it) } ?: file("../rmusic-release-key.keystore")
+              val isReleaseBuild = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+
+            val ksPasswordEnv = System.getenv("RMUSIC_KEYSTORE_PASSWORD")
+            val ksPasswordProp = project.findProperty("rmusic.keystore.password")?.toString()
+            val ksPassword = ksPasswordEnv ?: ksPasswordProp
+
+            val aliasEnv = System.getenv("RMUSIC_KEY_ALIAS")
+            val aliasProp = project.findProperty("rmusic.keystore.alias")?.toString()
+            val alias = aliasEnv ?: aliasProp
+
+            val keyPassEnv = System.getenv("RMUSIC_KEY_PASSWORD")
+            val keyPassProp = project.findProperty("rmusic.key.password")?.toString()
+            val keyPass = keyPassEnv ?: keyPassProp
+
+            if (isReleaseBuild) {
+                if (ksPassword.isNullOrBlank()) error("RMUSIC_KEYSTORE_PASSWORD or project property 'rmusic.keystore.password' must be set for release signing")
+                if (alias.isNullOrBlank()) error("RMUSIC_KEY_ALIAS or project property 'rmusic.keystore.alias' must be set for release signing")
+                if (keyPass.isNullOrBlank()) error("RMUSIC_KEY_PASSWORD or project property 'rmusic.key.password' must be set for release signing")
+
+                storePassword = ksPassword
+                keyAlias = alias
+                keyPassword = keyPass
+            } else {
+                // For non-release builds (e.g. debug), set values if present but don't fail.
+                storePassword = ksPassword ?: ""
+                keyAlias = alias ?: ""
+                keyPassword = keyPass ?: ""
+            }
         }
         
         create("ci") {
@@ -169,11 +195,14 @@ dependencies {
     implementation(libs.kotlin.coroutines)
     implementation(libs.kotlin.immutable)
     implementation(libs.kotlin.datetime)
+    implementation(libs.kotlin.serialization.json)
 
     implementation(libs.room)
     ksp(libs.room.compiler)
 
-    implementation(libs.log4j)
+    // log4j-api contains java.lang.invoke usage incompatible with minSdk < 26.
+    // Keep it as compileOnly so it isn't packaged into the Android APK.
+    compileOnly(libs.log4j)
     implementation(libs.slf4j)
     implementation(libs.logback)
 
@@ -187,7 +216,7 @@ dependencies {
     implementation(projects.providers.piped)
     implementation(projects.providers.sponsorblock)
     implementation(projects.providers.translate)
-    implementation(projects.providers.ytmusic)
+    implementation(projects.providers.intermusic)
     implementation(projects.download)
     implementation(projects.core.data)
     implementation(projects.core.ui)

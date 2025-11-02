@@ -427,36 +427,39 @@ fun MediaItemMenu(
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     IconButton(
-                        icon = if (likedAt == null) R.drawable.heart_outline else R.drawable.heart,
-                        color = colorPalette.favoritesIcon,
                         onClick = {
                             query {
+                                val newLikedAt = if (likedAt == null) System.currentTimeMillis() else null
                                 if (
                                     Database.like(
                                         songId = mediaItem.mediaId,
-                                        likedAt = if (likedAt == null) System.currentTimeMillis() else null
+                                        likedAt = newLikedAt
                                     ) != 0
                                 ) return@query
 
-                                Database.insert(mediaItem, Song::toggleLike)
+                                Database.insert(mediaItem)
+                                Database.like(
+                                    songId = mediaItem.mediaId,
+                                    likedAt = newLikedAt
+                                )
                             }
                         },
-                        modifier = Modifier
-                            .padding(all = 4.dp)
-                            .size(18.dp)
+                        icon = if (likedAt == null) R.drawable.heart_outline else R.drawable.heart,
+                        color = colorPalette.favoritesIcon
                     )
 
-                    if (!isLocal) IconButton(
-                        icon = R.drawable.share_social,
-                        color = colorPalette.text,
-                        onClick = {
-                            onDismiss()
-                            onShare()
-                        },
-                        modifier = Modifier
-                            .padding(all = 4.dp)
-                            .size(17.dp)
-                    )
+                    if (!isLocal) {
+                        IconButton(
+                            onClick = {
+                                onDismiss()
+                                onShare()
+                            },
+                            icon = R.drawable.share_social,
+                            modifier = Modifier
+                                .padding(all = 4.dp)
+                                .size(17.dp)
+                        )
+                    }
                 }
             }
 
@@ -739,12 +742,12 @@ fun MediaItemMenu(
                         ?: return@MenuEntry
                     
                     scope.lifecycleScope.launch {
-                        suspend fun resolveUrlPreferYtMusic(videoId: String): String? {
-                            // Prefer YTMusic provider when available
+                        suspend fun resolveUrlPreferIntermusic(videoId: String): String? {
+                            // Prefer Intermusic provider when available
                             return runCatching {
-                                val yt = com.rmusic.providers.ytmusic.YTMusicProvider.shared()
-                                val best = yt.getBestAudioStream(videoId).getOrNull()
-                                best?.url ?: yt.getStreamUrl(videoId).getOrNull()
+                                val provider = com.rmusic.providers.intermusic.IntermusicProvider.shared()
+                                val best = provider.getBestAudioStream(videoId).getOrNull()
+                                best?.url ?: provider.getStreamUrl(videoId).getOrNull()
                             }.getOrNull() ?: runCatching {
                                 // Fallback to Innertube
                                 Innertube.player(PlayerBody(videoId = videoId))?.getOrNull()?.streamingData?.adaptiveFormats
@@ -780,7 +783,7 @@ fun MediaItemMenu(
 
                         try {
                             val videoId = mediaItem.mediaId.removePrefix("https://youtube.com/watch?v=")
-                            val initialUrl = resolveUrlPreferYtMusic(videoId)
+                            val initialUrl = resolveUrlPreferIntermusic(videoId)
                             if (initialUrl == null) {
                                 withContext(Dispatchers.Main) { context.toast("Unable to get download URL") }
                                 return@launch
@@ -792,7 +795,7 @@ fun MediaItemMenu(
                                 val shouldRotate = ("403" in msg) || ("401" in msg) || ("expired" in msg)
                                 if (shouldRotate) {
                                     // Rotate link once
-                                    val rotated = resolveUrlPreferYtMusic(videoId)
+                                    val rotated = resolveUrlPreferIntermusic(videoId)
                                     if (rotated != null) {
                                         startDownloadWithUrl(rotated)
                                     } else throw e

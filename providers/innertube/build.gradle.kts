@@ -17,7 +17,9 @@ dependencies {
     implementation(libs.ktor.serialization.json)
 
     implementation(libs.rhino)
-    implementation(libs.log4j)
+    // Do not package log4j-api into Android apps (requires minSdk >= 26). Keep as
+    // compileOnly so it is available for JVM-only builds but not bundled into APKs.
+    compileOnly(libs.log4j)
 
     detektPlugins(libs.detekt.compose)
     detektPlugins(libs.detekt.formatting)

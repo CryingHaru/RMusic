@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -29,6 +30,7 @@ dependencies {
 
     implementation(libs.kotlin.coroutines)
     api(libs.ktor.serialization.json)
+    implementation(libs.kotlin.serialization.json)
 
     detektPlugins(libs.detekt.compose)
     detektPlugins(libs.detekt.formatting)

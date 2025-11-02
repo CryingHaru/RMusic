@@ -29,8 +29,10 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
@@ -43,6 +45,10 @@ import com.rmusic.android.LocalPlayerServiceBinder
 import com.rmusic.android.R
 import com.rmusic.android.models.Song
 import com.rmusic.android.preferences.DataPreferences
+import com.rmusic.android.preferences.QuickPicksSnapshot
+import com.rmusic.android.preferences.hasContent
+import com.rmusic.android.preferences.toSong
+import com.rmusic.android.preferences.toSnapshot
 import com.rmusic.android.query
 import com.rmusic.android.ui.components.LocalMenuState
 import com.rmusic.android.ui.components.ShimmerHost
@@ -59,6 +65,7 @@ import com.rmusic.android.ui.items.PlaylistItemPlaceholder
 import com.rmusic.android.ui.items.SongItem
 import com.rmusic.android.ui.items.SongItemPlaceholder
 import com.rmusic.android.ui.screens.Route
+import com.rmusic.android.utils.DeviceConstraints
 import com.rmusic.android.utils.asMediaItem
 import com.rmusic.android.utils.center
 import com.rmusic.android.utils.forcePlay
@@ -90,31 +97,76 @@ fun QuickPicks(
     val menuState = LocalMenuState.current
     val windowInsets = LocalPlayerAwareWindowInsets.current
 
-    var trending by persist<Song?>("home/trending")
+    val cachedSnapshot = remember(DataPreferences.shouldCacheQuickPicks) {
+        if (DataPreferences.shouldCacheQuickPicks) {
+            DataPreferences.quickPicksSnapshot.takeIf { it.hasContent() }
+        } else null
+    }
 
-    var relatedPageResult by persist<Result<Innertube.RelatedPage?>?>(tag = "home/relatedPageResult")
+    var trending by persist(
+        tag = "home/trending",
+        initialValue = cachedSnapshot?.trending?.toSong()
+    )
 
-    LaunchedEffect(relatedPageResult, DataPreferences.shouldCacheQuickPicks) {
-        if (DataPreferences.shouldCacheQuickPicks)
-            relatedPageResult?.getOrNull()?.let { DataPreferences.cachedQuickPicks = it }
-        else DataPreferences.cachedQuickPicks = Innertube.RelatedPage()
+    var relatedPageResult by persist<Result<Innertube.RelatedPage?>?>(
+        tag = "home/relatedPageResult",
+        initialValue = cachedSnapshot?.related?.let { Result.success(it) }
+    )
+
+    var shouldRefreshFromNetwork by remember { mutableStateOf(cachedSnapshot?.related != null) }
+
+    if (!DeviceConstraints.quickPicksEnabled) {
+        Column(
+            modifier = Modifier
+                .background(colorPalette.background0)
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Header(title = stringResource(R.string.quick_picks))
+            BasicText(
+                text = stringResource(R.string.quick_picks_disabled_low_spec),
+                style = typography.m,
+                modifier = Modifier.padding(top = 12.dp)
+            )
+        }
+        return
+    }
+
+    LaunchedEffect(trending, relatedPageResult, DataPreferences.shouldCacheQuickPicks) {
+        if (!DataPreferences.shouldCacheQuickPicks) {
+            DataPreferences.quickPicksSnapshot = QuickPicksSnapshot()
+            return@LaunchedEffect
+        }
+
+        val existing = DataPreferences.quickPicksSnapshot
+        val updatedTrending = trending?.toSnapshot() ?: existing.trending
+        val updatedRelated = relatedPageResult?.getOrNull() ?: existing.related
+
+        if (updatedTrending != existing.trending || updatedRelated != existing.related) {
+            DataPreferences.quickPicksSnapshot = QuickPicksSnapshot(
+                trending = updatedTrending,
+                related = updatedRelated,
+                timestamp = System.currentTimeMillis()
+            )
+        }
     }
 
     LaunchedEffect(DataPreferences.quickPicksSource) {
-        if (
-            DataPreferences.shouldCacheQuickPicks && !DataPreferences.cachedQuickPicks.let {
-                it.albums.isNullOrEmpty() &&
-                    it.artists.isNullOrEmpty() &&
-                    it.playlists.isNullOrEmpty() &&
-                    it.songs.isNullOrEmpty()
-            }
-        ) relatedPageResult = Result.success(DataPreferences.cachedQuickPicks)
+        shouldRefreshFromNetwork = true
 
         suspend fun handleSong(song: Song?) {
-            if (relatedPageResult == null || trending?.id != song?.id) relatedPageResult =
-                Innertube.relatedPage(
+            if (
+                relatedPageResult == null ||
+                relatedPageResult?.isFailure == true ||
+                trending?.id != song?.id ||
+                shouldRefreshFromNetwork
+            ) {
+                val result = Innertube.relatedPage(
                     body = NextBody(videoId = (song?.id ?: "J7p4bzqLvCw"))
                 )
+                relatedPageResult = result
+                shouldRefreshFromNetwork = result?.isSuccess != true
+            }
             trending = song
         }
 

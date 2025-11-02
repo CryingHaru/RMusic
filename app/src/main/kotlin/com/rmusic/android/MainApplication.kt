@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.ServiceConnection
 import android.net.Uri
 import android.os.Bundle
@@ -86,7 +87,7 @@ import com.rmusic.android.utils.DisposableListener
 import com.rmusic.android.utils.KeyedCrossfade
 import com.rmusic.android.utils.LocalMonetCompat
 // deduped import remains above
-import com.rmusic.providers.ytmusic.pages.SongResult as YTSongResult
+import com.rmusic.providers.intermusic.pages.SongResult as InterSongResult
 import com.rmusic.android.utils.collectProvidedBitmapAsState
 import com.rmusic.android.utils.forcePlay
 import com.rmusic.android.utils.intent
@@ -114,7 +115,7 @@ import com.rmusic.core.ui.utils.songBundle
 import com.rmusic.providers.innertube.Innertube
 import com.rmusic.providers.innertube.models.bodies.BrowseBody
 import com.rmusic.providers.innertube.requests.playlistPage
-import com.rmusic.providers.ytmusic.YTMusicProvider
+import com.rmusic.providers.intermusic.IntermusicProvider
 import com.rmusic.android.utils.asMediaItem
 import com.rmusic.providers.innertube.requests.song
 import coil3.ImageLoader
@@ -136,6 +137,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -153,29 +156,35 @@ class MainViewModel : ViewModel() {
 
 class MainActivity : ComponentActivity(), MonetColorsChangedListener {
     private val vm: MainViewModel by viewModels()
+    private var isServiceBound = false
+    private var pendingBindJob: Job? = null
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             if (service is PlayerService.Binder) vm.binder = service
+            isServiceBound = true
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             vm.binder = null
-            // Try to rebind, otherwise fail
-            unbindService(this)
-            bindService(intent<PlayerService>(), this, BIND_AUTO_CREATE)
+            isServiceBound = false
+            lifecycleScope.launch {
+                ensureServiceBound()
+            }
         }
     }
 
     private var _monet: MonetCompat? by mutableStateOf(null)
     private val monet get() = _monet ?: throw MonetActivityAccessException()
+    private var isMonetReady by mutableStateOf(false)
 
     override fun onStart() {
         super.onStart()
-    // Ensure the playback service is a started service so it survives unbind when app goes background
-    // Starting it while activity is in foreground avoids background start restrictions
-    startService(intent<PlayerService>())
-    bindService(intent<PlayerService>(), serviceConnection, BIND_AUTO_CREATE)
+        pendingBindJob?.cancel()
+        pendingBindJob = lifecycleScope.launch {
+            delay(120)
+            ensureServiceBound()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -193,9 +202,12 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
             listener = this,
             notifySelf = false
         )
-        monet.updateMonetColors()
+        setContent()
         monet.invokeOnReady {
-            setContent()
+            runOnUiThread { isMonetReady = true }
+        }
+        lifecycleScope.launch(Dispatchers.Default) {
+            runCatching { monet.updateMonetColors() }
         }
 
         intent?.let { handleIntent(it) }
@@ -206,15 +218,19 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
     @Composable
     fun AppWrapper(
         modifier: Modifier = Modifier,
+        monetReady: Boolean,
         content: @Composable BoxWithConstraintsScope.() -> Unit
     ) = with(AppearancePreferences) {
         val sampleBitmap = vm.binder.collectProvidedBitmapAsState()
+        val materialAccentColor = if (monetReady) runCatching {
+            Color(monet.getAccentColor(this@MainActivity))
+        }.getOrNull() else null
         val appearance = appearance(
             source = colorSource,
             mode = colorMode,
             darkness = darkness,
             fontFamily = fontFamily,
-            materialAccentColor = Color(monet.getAccentColor(this@MainActivity)),
+            materialAccentColor = materialAccentColor,
             sampleBitmap = sampleBitmap,
             applyFontPadding = applyFontPadding,
             thumbnailRoundness = thumbnailRoundness.dp
@@ -252,7 +268,8 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
                     .displayCutout
                     .only(WindowInsetsSides.Horizontal)
                     .asPaddingValues()
-            )
+            ),
+            monetReady = isMonetReady
         ) {
             val density = LocalDensity.current
             val bottomDp = with(density) { windowInsets.getBottom(density).toDp() }
@@ -441,7 +458,11 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
     }
 
     override fun onStop() {
-        unbindService(serviceConnection)
+        pendingBindJob?.cancel()
+        if (isServiceBound) runCatching {
+            unbindService(serviceConnection)
+        }
+        isServiceBound = false
         super.onStop()
     }
 
@@ -457,6 +478,13 @@ class MainActivity : ComponentActivity(), MonetColorsChangedListener {
         super.onUserLeaveHint()
 
         if (AppearancePreferences.autoPip && vm.binder?.player?.shouldBePlaying == true) maybeEnterPip()
+    }
+    private fun ensureServiceBound() {
+        if (isServiceBound) return
+        // Ensure the playback service is a started service so it survives unbind when app goes background
+        // Starting it while activity is in foreground avoids background start restrictions
+        startService(intent<PlayerService>())
+        isServiceBound = bindService(intent<PlayerService>(), serviceConnection, BIND_AUTO_CREATE)
     }
 }
 
@@ -510,11 +538,11 @@ fun handleUrl(
                     null
                 }
                     }?.let { videoId ->
-                        // Prefer YTMusic provider first
-                        val ytProvider = YTMusicProvider.shared()
-                        val ytSong = ytProvider.getPlayer(videoId).getOrNull()
-                        if (ytSong != null) withContext(Dispatchers.Main) {
-                            binder?.player?.let { p -> p.forcePlay((ytSong as YTSongResult).asMediaItem) }
+                        // Prefer Intermusic provider first
+                        val intermusicProvider = IntermusicProvider.shared()
+                        val intermusicSong = intermusicProvider.getPlayer(videoId).getOrNull()
+                        if (intermusicSong != null) withContext(Dispatchers.Main) {
+                            binder?.player?.let { player -> player.forcePlay((intermusicSong as InterSongResult).asMediaItem) }
                         } else {
                             Innertube.song(videoId)?.getOrNull()?.let { song ->
                                 withContext(Dispatchers.Main) {
@@ -531,6 +559,13 @@ val LocalPlayerServiceBinder = staticCompositionLocalOf<PlayerService.Binder?> {
 val LocalPlayerAwareWindowInsets =
     compositionLocalOf<WindowInsets> { error("No player insets provided") }
 val LocalCredentialManager = staticCompositionLocalOf { Dependencies.credentialManager }
+
+private const val PREFS_INTERMUSIC_AUTH = "intermusic_auth"
+private const val PREFS_INTERMUSIC_BOOT = "intermusic_boot"
+private const val LEGACY_PREFS_YTMUSIC_AUTH = "ytmusic_auth"
+private const val LEGACY_PREFS_YTMUSIC_BOOT = "ytmusic_boot"
+private const val KEY_SESSION_STATE = "session_state"
+private const val KEY_VISITOR_DATA = "visitorData"
 
 class MainApplication : Application(), SingletonImageLoader.Factory, Configuration.Provider {
     private fun installCrashLogger() {
@@ -571,7 +606,6 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
                 for (target in candidatePaths) {
                     wrote = runCatching {
                         target.parentFile?.mkdirs()
-        val LocalBottomBarHeight = compositionLocalOf { Dimensions.items.bottomNavigationHeight }
                         java.io.FileOutputStream(target, /* append = */ true).use { fos ->
                             fos.write(sb.toString().toByteArray())
                             fos.flush()
@@ -608,23 +642,27 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
         MonetCompat.enablePaletteCompat()
         ServiceNotifications.createAll()
 
-        // Attempt to restore previously saved YTMusic authentication session (non-blocking)
-        // This runs once per process start so that Settings screen & playback logic immediately
-        // see an authenticated provider if the user logged in earlier.
+        coroutineScope.launch(Dispatchers.IO) {
+            runCatching { IntermusicProvider.shared() }
+        }
         kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
-                val provider = com.rmusic.providers.ytmusic.YTMusicProvider.shared()
+                val provider = com.rmusic.providers.intermusic.IntermusicProvider.shared()
                 // 1) Pre-cargar visitorData desde preferencias si existe
-                val vdPrefs = getSharedPreferences("ytmusic_boot", Context.MODE_PRIVATE)
-                vdPrefs.getString("visitorData", null)?.let { provider.visitorData = it }
+                val vdPrefs = getSharedPreferences(PREFS_INTERMUSIC_BOOT, Context.MODE_PRIVATE).also {
+                    migrateLegacyVisitorData(it)
+                }
+                vdPrefs.getString(KEY_VISITOR_DATA, null)?.let { provider.visitorData = it }
 
                 // 2) Restaurar sesión si hay estado guardado
                 if (!provider.isLoggedIn()) {
-                    val prefs = getSharedPreferences("ytmusic_auth", Context.MODE_PRIVATE)
-                    val raw = prefs.getString("session_state", null)
+                    val prefs = getSharedPreferences(PREFS_INTERMUSIC_AUTH, Context.MODE_PRIVATE).also {
+                        migrateLegacySessionState(it)
+                    }
+                    val raw = prefs.getString(KEY_SESSION_STATE, null)
                     if (!raw.isNullOrBlank()) {
                         val state = Json.decodeFromString(
-                            com.rmusic.providers.ytmusic.models.account.AuthenticationState.serializer(),
+                            com.rmusic.providers.intermusic.models.account.AuthenticationState.serializer(),
                             raw
                         )
                         provider.importSessionData(state)
@@ -634,13 +672,29 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
                 // 3) Asegurar visitorData para funcionamiento básico si aún falta y persistirla
                 if (provider.visitorData.isNullOrBlank()) {
                     provider.ensureVisitorData()?.let { vd ->
-                        vdPrefs.edit().putString("visitorData", vd).apply()
+                        vdPrefs.edit().putString(KEY_VISITOR_DATA, vd).apply()
                     }
                 }
             }.onFailure { err ->
-                if (BuildConfig.DEBUG) android.util.Log.w("YTMusicRestore", "Failed to restore YTMusic session", err)
+                if (BuildConfig.DEBUG) android.util.Log.w("IntermusicRestore", "Failed to restore Intermusic session", err)
             }
         }
+    }
+
+    private fun migrateLegacyVisitorData(target: SharedPreferences) {
+        if (target.contains(KEY_VISITOR_DATA)) return
+        val legacy = getSharedPreferences(LEGACY_PREFS_YTMUSIC_BOOT, Context.MODE_PRIVATE)
+        val legacyValue = legacy.getString(KEY_VISITOR_DATA, null) ?: return
+        target.edit().putString(KEY_VISITOR_DATA, legacyValue).apply()
+        legacy.edit().remove(KEY_VISITOR_DATA).apply()
+    }
+
+    private fun migrateLegacySessionState(target: SharedPreferences) {
+        if (target.contains(KEY_SESSION_STATE)) return
+        val legacy = getSharedPreferences(LEGACY_PREFS_YTMUSIC_AUTH, Context.MODE_PRIVATE)
+        val legacyValue = legacy.getString(KEY_SESSION_STATE, null) ?: return
+        target.edit().putString(KEY_SESSION_STATE, legacyValue).apply()
+        legacy.edit().remove(KEY_SESSION_STATE).apply()
     }
 
     override fun newImageLoader(context: PlatformContext) = ImageLoader.Builder(this)

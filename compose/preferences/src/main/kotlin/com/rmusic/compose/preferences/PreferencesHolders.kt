@@ -14,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.properties.ReadWriteProperty
@@ -170,6 +172,22 @@ open class PreferencesHolder(
                 ?: defaultValue
         },
         set = { k, v -> putString(k, json.encodeToString(v)) },
+        default = defaultValue,
+        name = name
+    )
+
+    fun <Serializable : Any> json(
+        defaultValue: Serializable,
+        serializer: KSerializer<Serializable>,
+        name: String? = null,
+        json: Json = defaultJson
+    ): SharedPreferencesProperty<Serializable> = SharedPreferencesProperty(
+        get = { k ->
+            getString(k, json.encodeToString(serializer, defaultValue))
+                ?.let { json.decodeFromString(serializer, it) }
+                ?: defaultValue
+        },
+        set = { k, v -> putString(k, json.encodeToString(serializer, v)) },
         default = defaultValue,
         name = name
     )

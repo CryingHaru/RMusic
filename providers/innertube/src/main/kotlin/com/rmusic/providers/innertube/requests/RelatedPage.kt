@@ -24,13 +24,21 @@ suspend fun Innertube.relatedPage(body: NextBody) = runCatchingCancellable {
         )
     }.body<NextResponse>()
 
-    val browseId = nextResponse
+    val tabs = nextResponse
         .contents
         ?.singleColumnMusicWatchNextResultsRenderer
         ?.tabbedRenderer
         ?.watchNextTabbedResultsRenderer
         ?.tabs
-        ?.getOrNull(2)
+        .orEmpty()
+
+    val relatedTab = tabs.firstOrNull { tab ->
+        tab.tabRenderer?.title?.equals("Related", ignoreCase = true) == true
+    } ?: tabs.firstOrNull { tab ->
+        tab.tabRenderer?.endpoint?.browseEndpoint?.browseId != null
+    }
+
+    val browseId = relatedTab
         ?.tabRenderer
         ?.endpoint
         ?.browseEndpoint

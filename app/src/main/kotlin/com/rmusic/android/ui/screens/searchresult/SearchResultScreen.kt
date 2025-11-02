@@ -5,7 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,9 +44,9 @@ import com.rmusic.android.ui.screens.Route
 import com.rmusic.android.ui.screens.albumRoute
 import com.rmusic.android.ui.screens.artistRoute
 import com.rmusic.android.ui.screens.playlistRoute
-import com.rmusic.android.utils.asMediaItem
 import com.rmusic.android.utils.forcePlay
 import com.rmusic.android.utils.playingSong
+import com.rmusic.android.utils.asMediaItem
 import com.rmusic.compose.persist.LocalPersistMap
 import com.rmusic.compose.persist.PersistMapCleanup
 import com.rmusic.compose.routing.RouteHandler
@@ -57,9 +56,8 @@ import com.rmusic.providers.innertube.models.bodies.ContinuationBody
 import com.rmusic.providers.innertube.models.bodies.SearchBody
 import com.rmusic.providers.innertube.requests.searchPage
 import com.rmusic.providers.innertube.utils.from
-import com.rmusic.providers.ytmusic.YTMusicProvider
+import com.rmusic.providers.intermusic.IntermusicProvider
 import com.rmusic.providers.innertube.models.NavigationEndpoint
-import com.rmusic.android.utils.asMediaItem
 
 @OptIn(ExperimentalFoundationApi::class)
 @Route
@@ -70,15 +68,13 @@ fun SearchResultScreen(query: String, onSearchAgain: () -> Unit) {
     val menuState = LocalMenuState.current
 
     val saveableStateHolder = rememberSaveableStateHolder()
-    var ytSearchResult by remember(query) { mutableStateOf<com.rmusic.providers.ytmusic.pages.SearchResult?>(null) }
-    var ytTried by remember(query) { mutableStateOf(false) }
+    var intermusicSearchResult by remember(query) { mutableStateOf<com.rmusic.providers.intermusic.pages.SearchResult?>(null) }
     LaunchedEffect(query) {
-        val provider = YTMusicProvider.shared()
+        val provider = IntermusicProvider.shared()
         if (provider.isLoggedIn()) {
             runCatching { provider.search(query).getOrNull() }
-                .onSuccess { ytSearchResult = it }
+                .onSuccess { intermusicSearchResult = it }
         }
-        ytTried = true
     }
 
     PersistMapCleanup(prefix = "searchResults/$query/")
@@ -116,53 +112,49 @@ fun SearchResultScreen(query: String, onSearchAgain: () -> Unit) {
                 }
             ) { tabIndex ->
                 saveableStateHolder.SaveableStateProvider(tabIndex) {
-                    val ytSearch = ytSearchResult
+                    val intermusicResults = intermusicSearchResult
                     when (tabIndex) {
-                        0 -> if (ytSearch != null && ytSearch.songs.isNotEmpty()) {
-                            // Custom list for YTMusic songs
+                        0 -> if (intermusicResults != null && intermusicResults.songs.isNotEmpty()) {
                             val lazyListState = rememberLazyListState()
                             val (currentMediaId2, playing2) = playingSong(binder)
-                            Box {
-                                LazyColumn(
-                                    state = lazyListState,
-                                    contentPadding = com.rmusic.android.LocalPlayerAwareWindowInsets.current
-                                        .only(WindowInsetsSides.Vertical + WindowInsetsSides.End)
-                                        .asPaddingValues(),
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    item(key = "header") { headerContent(null) }
-                                    itemsIndexed(ytSearch.songs) { index, s ->
-                                        val mediaItem = s.asMediaItem
-                                        SongItem(
-                                            song = mediaItem,
-                                            thumbnailSize = Dimensions.thumbnails.song,
-                                            modifier = Modifier.combinedClickable(
-                                                onLongClick = {
-                                                    menuState.display {
-                                                        NonQueuedMediaItemMenu(
-                                                            onDismiss = menuState::hide,
-                                                            mediaItem = mediaItem
-                                                        )
-                                                    }
-                                                },
-                                                onClick = {
-                                                    binder?.stopRadio()
-                                                    val list = ytSearch.songs.map { it.asMediaItem }
-                                                    binder?.player?.forcePlay(mediaItem)
-                                                    // Iniciar radio para reproducir recomendaciones automáticamente
-                                                    binder?.setupRadio(
-                                                        com.rmusic.providers.innertube.models.NavigationEndpoint.Endpoint.Watch(
-                                                            videoId = mediaItem.mediaId,
-                                                            playlistId = null,
-                                                            params = null,
-                                                            playlistSetVideoId = null
-                                                        )
+
+                            LazyColumn(
+                                state = lazyListState,
+                                contentPadding = com.rmusic.android.LocalPlayerAwareWindowInsets.current
+                                    .only(WindowInsetsSides.Vertical + WindowInsetsSides.End)
+                                    .asPaddingValues(),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                item(key = "header") { headerContent(null) }
+                                itemsIndexed(intermusicResults.songs) { _, songResult ->
+                                    val mediaItem = songResult.asMediaItem
+                                    SongItem(
+                                        song = mediaItem,
+                                        thumbnailSize = Dimensions.thumbnails.song,
+                                        modifier = Modifier.combinedClickable(
+                                            onLongClick = {
+                                                menuState.display {
+                                                    NonQueuedMediaItemMenu(
+                                                        onDismiss = menuState::hide,
+                                                        mediaItem = mediaItem
                                                     )
                                                 }
-                                            ),
-                                            isPlaying = playing2 && currentMediaId2 == mediaItem.mediaId
-                                        )
-                                    }
+                                            },
+                                            onClick = {
+                                                binder?.stopRadio()
+                                                binder?.player?.forcePlay(mediaItem)
+                                                binder?.setupRadio(
+                                                    com.rmusic.providers.innertube.models.NavigationEndpoint.Endpoint.Watch(
+                                                        videoId = mediaItem.mediaId,
+                                                        playlistId = null,
+                                                        params = null,
+                                                        playlistSetVideoId = null
+                                                    )
+                                                )
+                                            }
+                                        ),
+                                        isPlaying = playing2 && currentMediaId2 == mediaItem.mediaId
+                                    )
                                 }
                             }
                         } else ItemsPage(
@@ -335,29 +327,28 @@ fun SearchResultScreen(query: String, onSearchAgain: () -> Unit) {
                             }
                         )
 
-                        4 -> if (ytSearch != null && ytSearch.playlists.isNotEmpty()) {
+                        4 -> if (intermusicResults != null && intermusicResults.playlists.isNotEmpty()) {
                             val lazyListState = rememberLazyListState()
-                            Box {
-                                LazyColumn(
-                                    state = lazyListState,
-                                    contentPadding = com.rmusic.android.LocalPlayerAwareWindowInsets.current
-                                        .only(WindowInsetsSides.Vertical + WindowInsetsSides.End)
-                                        .asPaddingValues(),
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    item(key = "header") { headerContent(null) }
-                                    itemsIndexed(ytSearch.playlists) { index, p ->
-                                        PlaylistItem(
-                                            thumbnailUrl = p.thumbnails.firstOrNull()?.url,
-                                            songCount = p.songCount,
-                                            name = p.title,
-                                            channelName = p.author,
-                                            thumbnailSize = Dimensions.thumbnails.playlist,
-                                            modifier = Modifier.clickable {
-                                                playlistRoute(p.browseId, null, null, false)
-                                            }
-                                        )
-                                    }
+
+                            LazyColumn(
+                                state = lazyListState,
+                                contentPadding = com.rmusic.android.LocalPlayerAwareWindowInsets.current
+                                    .only(WindowInsetsSides.Vertical + WindowInsetsSides.End)
+                                    .asPaddingValues(),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                item(key = "header") { headerContent(null) }
+                                itemsIndexed(intermusicResults.playlists) { _, playlistResult ->
+                                    PlaylistItem(
+                                        thumbnailUrl = playlistResult.thumbnails.firstOrNull()?.url,
+                                        songCount = playlistResult.songCount,
+                                        name = playlistResult.title,
+                                        channelName = playlistResult.author,
+                                        thumbnailSize = Dimensions.thumbnails.playlist,
+                                        modifier = Modifier.clickable {
+                                            playlistRoute(playlistResult.browseId, null, null, false)
+                                        }
+                                    )
                                 }
                             }
                         } else ItemsPage(

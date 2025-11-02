@@ -23,8 +23,8 @@ import com.rmusic.providers.innertube.Innertube
 import com.rmusic.providers.innertube.models.bodies.ContinuationBody
 import com.rmusic.providers.innertube.requests.playlistPage
 import com.rmusic.providers.piped.models.Playlist
-import com.rmusic.providers.ytmusic.pages.SongResult as YTSongResult
-import com.rmusic.providers.ytmusic.pages.SongItem as YTSongItem
+import com.rmusic.providers.intermusic.pages.SongResult as InterSongResult
+import com.rmusic.providers.intermusic.pages.SongItem as InterSongItem
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onEach
@@ -144,8 +144,8 @@ val Song.asMediaItem: MediaItem
         .setCustomCacheKey(id)
         .build()
 
-// YTMusic provider mappings (prefer this when authenticated)
-val YTSongResult.asMediaItem: MediaItem
+// Intermusic provider mappings (prefer this when authenticated)
+val InterSongResult.asMediaItem: MediaItem
     get() = MediaItem.Builder()
         .setMediaId(videoId)
         .setUri(videoId)
@@ -168,7 +168,7 @@ val YTSongResult.asMediaItem: MediaItem
         )
         .build()
 
-val YTSongItem.asMediaItem: MediaItem
+val InterSongItem.asMediaItem: MediaItem
     get() = MediaItem.Builder()
         .setMediaId(videoId)
         .setUri(videoId)

@@ -61,8 +61,8 @@ import com.rmusic.core.ui.utils.isLandscape
 import com.rmusic.providers.innertube.Innertube
 import com.rmusic.providers.innertube.models.bodies.BrowseBody
 import com.rmusic.providers.innertube.requests.playlistPage
-import com.rmusic.providers.ytmusic.YTMusicProvider
-import com.rmusic.providers.ytmusic.pages.PlaylistResult
+import com.rmusic.providers.intermusic.IntermusicProvider
+import com.rmusic.providers.intermusic.pages.PlaylistResult
 import com.valentinilk.shimmer.shimmer
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
@@ -86,9 +86,9 @@ fun PlaylistSongList(
     var ytPlaylist by persist<PlaylistResult?>("playlist/$browseId/ytPlaylist")
 
     LaunchedEffect(Unit) {
-        // Try YTMusic first (strip VL prefix if present)
+        // Try Intermusic first (strip VL prefix if present)
         if (ytPlaylist == null) {
-            val provider = YTMusicProvider.shared()
+            val provider = IntermusicProvider.shared()
             if (provider.isLoggedIn()) {
                 val id = browseId.removePrefix("VL")
                 ytPlaylist = withContext(Dispatchers.IO) { provider.getPlaylist(id).getOrNull() }
@@ -199,7 +199,7 @@ fun PlaylistSongList(
 
     val (currentMediaId, playing) = playingSong(binder)
 
-    // Precompute songs list (YTMusic preferred) so it's accessible for list + FAB
+    // Precompute songs list (Intermusic preferred) so it's accessible for list + FAB
     val songsForList = ytPlaylist?.tracks?.map { it.asMediaItem } ?: playlistPage?.songsPage?.items?.map(Innertube.SongItem::asMediaItem)
 
     LayoutWithAdaptiveThumbnail(
