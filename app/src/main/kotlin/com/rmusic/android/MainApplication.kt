@@ -576,7 +576,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
                 val ts = java.time.ZonedDateTime.now().toString()
                 val sb = StringBuilder()
                     .appendLine("===== CRASH @ $ts =====")
-                    .appendLine("Thread: ${thread.name} (${thread.id})")
+                    .appendLine("Thread: ${thread.name} (${thread.threadId()})")
                     .appendLine("App: ${BuildConfig.APPLICATION_ID} ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                     .appendLine("Android: ${android.os.Build.VERSION.SDK_INT} (${android.os.Build.VERSION.RELEASE})")
                     .appendLine("Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
@@ -645,7 +645,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
         coroutineScope.launch(Dispatchers.IO) {
             runCatching { IntermusicProvider.shared() }
         }
-        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        coroutineScope.launch(Dispatchers.IO) {
             runCatching {
                 val provider = com.rmusic.providers.intermusic.IntermusicProvider.shared()
                 // 1) Pre-cargar visitorData desde preferencias si existe
