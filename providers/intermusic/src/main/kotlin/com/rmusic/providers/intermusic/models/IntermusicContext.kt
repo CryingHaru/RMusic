@@ -25,5 +25,12 @@ data class IntermusicContext(
         val deviceMake: String? = null,
         val deviceModel: String? = null,
         val osName: String? = null,
+        val originalUrl: String? = null,
+        val platform: String? = null,
+        val clientFormFactor: String? = null,
+        val timeZone: String? = null,
+        val utcOffsetMinutes: Int? = null,
+        val acceptLanguage: String? = null,
+        val userInterfaceTheme: String? = null,
     )
 }

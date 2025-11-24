@@ -2,14 +2,10 @@ package com.rmusic.android.preferences
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
-import androidx.core.content.edit
 import com.rmusic.android.GlobalPreferencesHolder
 import com.rmusic.android.R
 import com.rmusic.core.data.enums.CoilDiskCacheSize
 import com.rmusic.core.data.enums.ExoPlayerDiskCacheSize
-import com.rmusic.providers.innertube.Innertube
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
@@ -32,20 +28,11 @@ object DataPreferences : GlobalPreferencesHolder() {
         defaultValue = QuickPicksSnapshot(),
         serializer = QuickPicksSnapshot.serializer()
     )
-    var cachedQuickPicks: Innertube.RelatedPage
-        get() = quickPicksSnapshot.related ?: Innertube.RelatedPage()
-        set(value) {
-            quickPicksSnapshot = quickPicksSnapshot.copy(
-                related = value.takeIf { it.hasContent() },
-                trending = quickPicksSnapshot.trending,
-                timestamp = if (value.hasContent()) System.currentTimeMillis() else quickPicksSnapshot.timestamp
-            )
-        }
     var autoSyncPlaylists by boolean(true)
-
-    init {
-        migrateLegacyQuickPicks()
-    }
+    var cookies by string("")
+    var authUser by string("0")
+    var pageId by string("")
+    var idToken by string("")
     
     // Download preferences
     var wifiOnlyDownloads by boolean(true)
@@ -56,7 +43,6 @@ object DataPreferences : GlobalPreferencesHolder() {
         val duration: Duration? = null
     ) {
         PastDay(displayName = { stringResource(R.string.past_24_hours) }, duration = 1.days),
-        PastWeek(displayName = { stringResource(R.string.past_week) }, duration = 7.days),
         PastMonth(displayName = { stringResource(R.string.past_month) }, duration = 30.days),
         PastYear(displayName = { stringResource(R.string.past_year) }, 365.days),
         AllTime(displayName = { stringResource(R.string.all_time) })
@@ -82,30 +68,5 @@ object DataPreferences : GlobalPreferencesHolder() {
         val bitrate: Int
     ) {
         High(displayName = { stringResource(R.string.high_quality) }, bitrate = 160)  // YouTube's actual max ~160kbps AAC
-    }
-
-    private fun migrateLegacyQuickPicks() {
-        if (quickPicksSnapshot.hasContent()) return
-
-        val legacyRaw = getString("cachedQuickPicks", null) ?: return
-        runCatching {
-            legacyQuickPicksJson.decodeFromString(Innertube.RelatedPage.serializer(), legacyRaw)
-        }.onSuccess { legacyPage ->
-            if (!legacyPage.hasContent()) return@onSuccess
-
-            quickPicksSnapshot = QuickPicksSnapshot(
-                trending = quickPicksSnapshot.trending,
-                related = legacyPage,
-                timestamp = System.currentTimeMillis()
-            )
-
-            edit(commit = true) { remove("cachedQuickPicks") }
-        }
-    }
-
-    private val legacyQuickPicksJson = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-        isLenient = true
     }
 }

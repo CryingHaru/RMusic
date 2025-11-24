@@ -33,10 +33,12 @@ class UriCache<Key : Any, Meta>(size: Int = 16) {
         val validUntil: Instant?
     )
 
+    @Synchronized
     operator fun get(key: Key) = buffer.find {
         it != null && it.key == key && (it.validUntil == null || it.validUntil > Clock.System.now())
     }
 
+    @Synchronized
     fun push(
         key: Key,
         meta: Meta,
@@ -48,5 +50,15 @@ class UriCache<Key : Any, Meta>(size: Int = 16) {
         buffer += CachedUri(key, meta, uri, validUntil)
     }
 
-    fun clear() = buffer.clear()
+    @Synchronized
+    fun clear() {
+        buffer.clear()
+    }
+
+    @Synchronized
+    fun remove(key: Key) {
+        val survivors = buffer.filter { cached -> cached != null && cached.key != key }
+        buffer.clear()
+        survivors.forEach { buffer += it }
+    }
 }

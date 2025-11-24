@@ -44,7 +44,7 @@ import com.rmusic.core.ui.overlay
 import com.rmusic.core.ui.shimmer
 import com.rmusic.core.ui.utils.px
 import com.rmusic.core.ui.utils.roundedShape
-import com.rmusic.providers.innertube.Innertube
+import com.rmusic.providers.intermusic.pages.PlaylistItem as InterPlaylistItem
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -133,15 +133,15 @@ fun PlaylistItem(
 
 @Composable
 fun PlaylistItem(
-    playlist: Innertube.PlaylistItem,
+    playlist: InterPlaylistItem,
     thumbnailSize: Dp,
     modifier: Modifier = Modifier,
     alternative: Boolean = false
 ) = PlaylistItem(
-    thumbnailUrl = playlist.thumbnail?.url,
+    thumbnailUrl = playlist.thumbnails.firstOrNull()?.url,
     songCount = playlist.songCount,
-    name = playlist.info?.name,
-    channelName = playlist.channel?.name,
+    name = playlist.title,
+    channelName = playlist.author,
     thumbnailSize = thumbnailSize,
     modifier = modifier,
     alternative = alternative

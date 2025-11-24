@@ -20,7 +20,7 @@ import com.rmusic.android.utils.thumbnail
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.shimmer
 import com.rmusic.core.ui.utils.px
-import com.rmusic.providers.innertube.Innertube
+import com.rmusic.providers.intermusic.pages.AlbumItem as InterAlbumItem
 import coil3.compose.AsyncImage
 
 @Composable
@@ -41,14 +41,14 @@ fun AlbumItem(
 
 @Composable
 fun AlbumItem(
-    album: Innertube.AlbumItem,
+    album: InterAlbumItem,
     thumbnailSize: Dp,
     modifier: Modifier = Modifier,
     alternative: Boolean = false
 ) = AlbumItem(
-    thumbnailUrl = album.thumbnail?.url,
-    title = album.info?.name,
-    authors = album.authors?.joinToString("") { it.name.orEmpty() },
+    thumbnailUrl = album.thumbnails.firstOrNull()?.url,
+    title = album.title,
+    authors = album.artists.joinToString(separator = ", ") { it.name },
     year = album.year,
     thumbnailSize = thumbnailSize,
     alternative = alternative,

@@ -83,9 +83,7 @@ import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.favoritesIcon
 import com.rmusic.core.ui.utils.px
 import com.rmusic.core.ui.utils.roundedShape
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.PlayerBody
-import com.rmusic.providers.innertube.requests.player
+import com.rmusic.providers.intermusic.IntermusicProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -497,14 +495,12 @@ private fun DownloadControl(media: UiMedia) {
                 lifecycleOwner?.lifecycleScope?.launch {
                     try {
                         val videoId = media.id.removePrefix("https://youtube.com/watch?v=")
-                        val playerResponse = Innertube.player(
-                            PlayerBody(videoId = videoId)
-                        )?.getOrNull()
+                        val intermusicProvider = IntermusicProvider.shared()
+                        val audioStream = intermusicProvider
+                            .getBestAudioStream(videoId)
+                            .getOrNull()
 
-                        val streamingUrl = playerResponse?.streamingData?.adaptiveFormats
-                            ?.filter { it.mimeType?.startsWith("audio/") == true }
-                            ?.maxByOrNull { it.bitrate ?: 0 }
-                            ?.url
+                        val streamingUrl = audioStream?.url
 
                         if (streamingUrl != null) {
                             MusicDownloadService.download(

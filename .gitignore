@@ -11,9 +11,50 @@ build
 local.properties
 
 .kotlin
-/.github
-/.github
-.github/ISSUE_TEMPLATE/bug_report.yaml
-rmusic-release-key.keystore
+
+# Keystores y credenciales
+*.keystore
+*.jks
+*.pem
+*.p12
+*.pfx
 signing.env
-index.js
+keystore.properties
+
+# Archivos de entorno
+.env
+.env.*
+*.local
+
+# Secrets y configuración sensible
+secrets/
+credentials/
+google-services.json
+firebase*.json
+
+# Logs
+*.log
+logs/
+
+# Archivos temporales
+*.tmp
+*.temp
+*.swp
+*~
+
+# OS específicos
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+*.ipr
+*.iws
+.vscode/
+*.code-workspace
+
+# APKs generados localmente
+*.apk
+*.aab
+

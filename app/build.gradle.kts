@@ -210,10 +210,8 @@ dependencies {
     implementation(libs.ktor.client.okhttp)
 
     implementation(projects.providers.github)
-    implementation(projects.providers.innertube)
     implementation(projects.providers.kugou)
     implementation(projects.providers.lrclib)
-    implementation(projects.providers.piped)
     implementation(projects.providers.sponsorblock)
     implementation(projects.providers.translate)
     implementation(projects.providers.intermusic)

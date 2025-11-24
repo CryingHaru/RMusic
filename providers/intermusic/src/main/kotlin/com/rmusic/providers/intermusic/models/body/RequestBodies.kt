@@ -10,7 +10,6 @@ data class PlayerBody(
     val playlistId: String? = null,
     val cpn: String? = null,
     val playbackContext: PlaybackContext? = null,
-    val serviceIntegrityDimensions: ServiceIntegrityDimensions? = null,
     
     val contentCheckOk: Boolean = true,
     val racyCheckOk: Boolean = true,
@@ -23,11 +22,6 @@ data class PlayerBody(
     @Serializable
     data class ContentPlaybackContext(
         val signatureTimestamp: String? = null,
-    )
-
-    @Serializable
-    data class ServiceIntegrityDimensions(
-        val poToken: String? = null,
     )
 }
 
@@ -55,4 +49,10 @@ data class NextBody(
     val index: Int? = null,
     val params: String? = null,
     val continuation: String? = null,
+)
+
+@Serializable
+data class SearchSuggestionsBody(
+    val context: IntermusicContext,
+    val input: String,
 )

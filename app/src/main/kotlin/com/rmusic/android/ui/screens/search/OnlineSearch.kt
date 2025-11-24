@@ -60,9 +60,7 @@ import com.rmusic.android.utils.secondary
 import com.rmusic.compose.persist.persist
 import com.rmusic.compose.persist.persistList
 import com.rmusic.core.ui.LocalAppearance
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.SearchSuggestionsBody
-import com.rmusic.providers.innertube.requests.searchSuggestions
+import com.rmusic.providers.intermusic.IntermusicProvider
 import io.ktor.http.Url
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.delay
@@ -81,7 +79,9 @@ fun OnlineSearch(
     val (colorPalette, typography) = LocalAppearance.current
 
     var history by persistList<SearchQuery>("search/online/history")
-    var suggestionsResult by persist<Result<List<String>?>?>("search/online/suggestionsResult")
+    var suggestionsResult by persist<Result<List<String>>?>("search/online/suggestionsResult")
+
+    val intermusicProvider = remember { IntermusicProvider.shared() }
 
     LaunchedEffect(textFieldValue.text) {
         if (DataPreferences.pauseSearchHistory) return@LaunchedEffect
@@ -95,9 +95,7 @@ fun OnlineSearch(
         if (textFieldValue.text.isEmpty()) return@LaunchedEffect
 
         delay(500)
-        suggestionsResult = Innertube.searchSuggestions(
-            body = SearchSuggestionsBody(input = textFieldValue.text)
-        )
+        suggestionsResult = intermusicProvider.getSearchSuggestions(textFieldValue.text)
     }
 
     val playlistId = remember(textFieldValue.text) {

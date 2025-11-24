@@ -45,13 +45,6 @@ fun PlayerSettings() = with(PlayerPreferences) {
             )
 
             SwitchSettingsEntry(
-                title = stringResource(R.string.disable_innertube_fallback),
-                text = stringResource(R.string.disable_innertube_fallback_description),
-                isChecked = disableInnertubeFallback,
-                onCheckedChange = { disableInnertubeFallback = it }
-            )
-
-            SwitchSettingsEntry(
                 title = stringResource(R.string.auto_play_recommendations),
                 text = stringResource(R.string.auto_play_recommendations_description),
                 isChecked = autoPlayRecommendations,

@@ -87,10 +87,6 @@ import com.rmusic.core.ui.favoritesIcon
 import com.rmusic.core.ui.utils.px
 import com.rmusic.core.ui.utils.roundedShape
 import com.rmusic.core.ui.utils.songBundle
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.PlayerBody
-import com.rmusic.providers.innertube.models.NavigationEndpoint
-import com.rmusic.providers.innertube.requests.player
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -167,12 +163,7 @@ fun NonQueuedMediaItemMenu(
         onStartRadio = {
             binder?.stopRadio()
             binder?.player?.forcePlay(mediaItem)
-            binder?.setupRadio(
-                NavigationEndpoint.Endpoint.Watch(
-                    videoId = mediaItem.mediaId,
-                    playlistId = mediaItem.mediaMetadata.extras?.getString("playlistId")
-                )
-            )
+            binder?.setupRadio(mediaItem.mediaId)
         },
         onPlayNext = { binder?.player?.addNext(mediaItem) },
         onEnqueue = { binder?.player?.enqueue(mediaItem) },
@@ -742,20 +733,12 @@ fun MediaItemMenu(
                         ?: return@MenuEntry
                     
                     scope.lifecycleScope.launch {
-                        suspend fun resolveUrlPreferIntermusic(videoId: String): String? {
-                            // Prefer Intermusic provider when available
-                            return runCatching {
+                        suspend fun resolveUrlPreferIntermusic(videoId: String): String? =
+                            runCatching {
                                 val provider = com.rmusic.providers.intermusic.IntermusicProvider.shared()
-                                val best = provider.getBestAudioStream(videoId).getOrNull()
-                                best?.url ?: provider.getStreamUrl(videoId).getOrNull()
-                            }.getOrNull() ?: runCatching {
-                                // Fallback to Innertube
-                                Innertube.player(PlayerBody(videoId = videoId))?.getOrNull()?.streamingData?.adaptiveFormats
-                                    ?.filter { it.mimeType?.startsWith("audio/") == true }
-                                    ?.maxByOrNull { it.bitrate ?: 0 }
-                                    ?.url
+                                provider.getBestAudioStream(videoId).getOrNull()?.url
+                                    ?: provider.getStreamUrl(videoId).getOrNull()
                             }.getOrNull()
-                        }
 
                         suspend fun startDownloadWithUrl(url: String) {
                             val extras = mediaItem.mediaMetadata.extras?.songBundle

@@ -25,21 +25,21 @@ import com.rmusic.core.ui.onOverlay
 import com.rmusic.core.ui.overlay
 import com.rmusic.core.ui.shimmer
 import com.rmusic.core.ui.utils.roundedShape
-import com.rmusic.providers.innertube.Innertube
+import com.rmusic.providers.intermusic.pages.VideoItem as InterVideoItem
 import coil3.compose.AsyncImage
 
 @Composable
 fun VideoItem(
-    video: Innertube.VideoItem,
+    video: InterVideoItem,
     thumbnailWidth: Dp,
     thumbnailHeight: Dp,
     modifier: Modifier = Modifier
 ) = VideoItem(
-    thumbnailUrl = video.thumbnail?.url,
-    duration = video.durationText,
-    title = video.info?.name,
-    uploader = video.authors?.joinToString("") { it.name.orEmpty() },
-    views = video.viewsText,
+    thumbnailUrl = video.thumbnails.firstOrNull()?.url,
+    duration = video.duration,
+    title = video.title,
+    uploader = video.author,
+    views = video.viewCount,
     thumbnailWidth = thumbnailWidth,
     thumbnailHeight = thumbnailHeight,
     modifier = modifier

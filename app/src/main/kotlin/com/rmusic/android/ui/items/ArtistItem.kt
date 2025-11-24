@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -22,7 +23,7 @@ import com.rmusic.android.utils.thumbnail
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.shimmer
 import com.rmusic.core.ui.utils.px
-import com.rmusic.providers.innertube.Innertube
+import com.rmusic.providers.intermusic.pages.ArtistItem as InterArtistItem
 import coil3.compose.AsyncImage
 
 @Composable
@@ -42,14 +43,14 @@ fun ArtistItem(
 
 @Composable
 fun ArtistItem(
-    artist: Innertube.ArtistItem,
+    artist: InterArtistItem,
     thumbnailSize: Dp,
     modifier: Modifier = Modifier,
     alternative: Boolean = false
 ) = ArtistItem(
-    thumbnailUrl = artist.thumbnail?.url,
-    name = artist.info?.name,
-    subscribersCount = artist.subscribersCountText,
+    thumbnailUrl = artist.thumbnails.firstOrNull()?.url,
+    name = artist.name,
+    subscribersCount = null,
     thumbnailSize = thumbnailSize,
     modifier = modifier,
     alternative = alternative
@@ -74,6 +75,7 @@ fun ArtistItem(
     AsyncImage(
         model = thumbnailUrl?.thumbnail(thumbnailSize.px),
         contentDescription = null,
+        contentScale = ContentScale.Crop,
         modifier = Modifier
             .clip(CircleShape)
             .requiredSize(thumbnailSize)

@@ -107,13 +107,13 @@ import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.onOverlay
 import com.rmusic.core.ui.utils.roundedShape
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.NextBody
-import com.rmusic.providers.innertube.requests.nextPage
+import com.rmusic.providers.intermusic.IntermusicProvider
+import com.rmusic.providers.intermusic.pages.SongItem as InterSongItem
 import com.valentinilk.shimmer.shimmer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -170,14 +170,34 @@ fun Queue(
     }
 
     LaunchedEffect(mediaItemIndex, shouldLoadSuggestions) {
-        if (shouldLoadSuggestions) withContext(Dispatchers.IO) {
-            suggestions = runCatching {
-                Innertube.nextPage(
-                    NextBody(videoId = windows[mediaItemIndex].mediaItem.mediaId)
-                )?.mapCatching { page ->
-                    page.itemsPage?.items?.map { it.asMediaItem }
+        if (!shouldLoadSuggestions || mediaItemIndex !in windows.indices) return@LaunchedEffect
+
+        suggestions = withContext(Dispatchers.IO) {
+            runCatching<List<MediaItem>?> {
+                val window = windows.getOrNull(mediaItemIndex) ?: return@runCatching emptyList()
+                val mediaItem = window.mediaItem
+                val queryTitle = mediaItem.mediaMetadata.title?.toString()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: mediaItem.mediaMetadata.displayTitle?.toString()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: mediaItem.mediaId.takeUnless { it.isBlank() }
+                if (queryTitle.isNullOrBlank()) {
+                    emptyList()
+                } else {
+                    IntermusicProvider.shared()
+                        .search(queryTitle, IntermusicProvider.SearchFilter.SONGS)
+                        .getOrNull()
+                        ?.songs
+                        ?.filter { it.videoId != mediaItem.mediaId }
+                        ?.map(InterSongItem::asMediaItem)
+                        ?.take(20)
                 }
-            }.also { it.exceptionOrNull()?.printStackTrace() }.getOrNull()
+            }.also { result ->
+                result.exceptionOrNull()?.let { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    throwable.printStackTrace()
+                }
+            }
         }
     }
 

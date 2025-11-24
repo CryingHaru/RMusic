@@ -31,14 +31,10 @@ import com.rmusic.android.ui.items.AlbumItemPlaceholder
 import com.rmusic.compose.persist.persist
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.BrowseBody
-import com.rmusic.providers.innertube.requests.BrowseResult
-import com.rmusic.providers.innertube.requests.browse
+import com.rmusic.providers.intermusic.IntermusicProvider
+import com.rmusic.providers.intermusic.pages.SearchResult
 import com.valentinilk.shimmer.shimmer
 import kotlinx.collections.immutable.toImmutableList
-
-private const val DEFAULT_BROWSE_ID = "FEmusic_new_releases_albums"
 
 @Composable
 fun MoreAlbumsList(
@@ -50,25 +46,23 @@ fun MoreAlbumsList(
 
     val endPaddingValues = windowInsets.only(WindowInsetsSides.End).asPaddingValues()
 
-    var albumsPage by persist<BrowseResult>(tag = "more_albums/list")
+    var albumSearch by persist<Result<SearchResult>>(tag = "more_albums/list")
     val data by remember {
         derivedStateOf {
-            albumsPage
-                ?.items
-                ?.firstOrNull()
-                ?.items
-                ?.filterIsInstance<Innertube.AlbumItem>()
+            albumSearch
+                ?.getOrNull()
+                ?.albums
                 ?.toImmutableList()
         }
     }
 
     LaunchedEffect(Unit) {
-        if (albumsPage != null) return@LaunchedEffect
+        if (albumSearch != null) return@LaunchedEffect
 
-        albumsPage = Innertube
-            .browse(BrowseBody(browseId = DEFAULT_BROWSE_ID))
-            ?.also { it.exceptionOrNull()?.printStackTrace() }
-            ?.getOrNull()
+        albumSearch = IntermusicProvider.shared().search(
+            query = "new releases",
+            filter = IntermusicProvider.SearchFilter.ALBUMS
+        )
     }
 
     LazyVerticalGrid(
@@ -85,7 +79,7 @@ fun MoreAlbumsList(
             contentType = 0,
             span = { GridItemSpan(maxLineSpan) }
         ) {
-            if (albumsPage == null) HeaderPlaceholder(modifier = Modifier.shimmer())
+            if (albumSearch == null) HeaderPlaceholder(modifier = Modifier.shimmer())
             else Header(
                 title = stringResource(R.string.new_released_albums),
                 modifier = Modifier.padding(endPaddingValues)
@@ -95,7 +89,7 @@ fun MoreAlbumsList(
         data?.let { page ->
             itemsIndexed(
                 items = page,
-                key = { i, item -> "item:$i,${item.key}" }
+                key = { i, item -> "item:$i,${item.browseId}" }
             ) { _, album ->
                 BoxWithConstraints {
                     AlbumItem(
@@ -104,7 +98,7 @@ fun MoreAlbumsList(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                onAlbumClick(album.key)
+                                onAlbumClick(album.browseId)
                             },
                         alternative = true
                     )
@@ -112,7 +106,7 @@ fun MoreAlbumsList(
             }
         }
 
-        if (albumsPage == null) item(
+        if (albumSearch == null) item(
             key = "loading",
             contentType = 0,
             span = { GridItemSpan(maxLineSpan) }

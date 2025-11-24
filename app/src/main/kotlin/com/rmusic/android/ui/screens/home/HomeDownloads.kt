@@ -80,7 +80,6 @@ import com.rmusic.core.ui.utils.SongBundleAccessor
 import com.rmusic.download.models.DownloadItem
 import com.rmusic.download.DownloadState
 import com.rmusic.download.DownloadManager
-import com.rmusic.providers.innertube.models.NavigationEndpoint
 import kotlinx.collections.immutable.toImmutableMap
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -331,6 +330,7 @@ private fun DownloadItemRow(item: DownloadItem) {
         AsyncImage(
             model = item.thumbnailUrl,
             contentDescription = null,
+            contentScale = ContentScale.Crop,
             modifier = Modifier
                 .size(48.dp)
                 .clip(RoundedCornerShape(4.dp))
@@ -649,6 +649,7 @@ private fun SongDownloadItem(song: DownloadedSong) {
         AsyncImage(
             model = song.thumbnailUrl,
             contentDescription = null,
+            contentScale = ContentScale.Crop,
             modifier = Modifier
                 .size(48.dp)
                 .clip(RoundedCornerShape(4.dp))

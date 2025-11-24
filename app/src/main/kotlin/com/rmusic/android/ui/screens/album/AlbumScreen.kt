@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -26,24 +27,18 @@ import com.rmusic.android.ui.components.themed.HeaderPlaceholder
 import com.rmusic.android.ui.components.themed.PlaylistInfo
 import com.rmusic.android.ui.components.themed.Scaffold
 import com.rmusic.android.ui.components.themed.adaptiveThumbnailContent
-import com.rmusic.android.ui.items.AlbumItem
-import com.rmusic.android.ui.items.AlbumItemPlaceholder
 import com.rmusic.android.ui.screens.GlobalRoutes
 import com.rmusic.android.ui.screens.Route
 import com.rmusic.android.ui.screens.albumRoute
-import com.rmusic.android.ui.screens.searchresult.ItemsPage
 import com.rmusic.android.utils.asMediaItem
-import com.rmusic.android.utils.completed
 import com.rmusic.compose.persist.PersistMapCleanup
 import com.rmusic.compose.persist.persist
 import com.rmusic.compose.persist.persistList
 import com.rmusic.compose.routing.RouteHandler
-import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.utils.stateFlowSaver
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.BrowseBody
-import com.rmusic.providers.innertube.requests.albumPage
+import com.rmusic.providers.intermusic.IntermusicProvider
+import com.rmusic.providers.intermusic.pages.AlbumResult
 import com.valentinilk.shimmer.shimmer
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
@@ -59,12 +54,13 @@ import kotlinx.coroutines.withContext
 @Composable
 fun AlbumScreen(browseId: String) {
     val saveableStateHolder = rememberSaveableStateHolder()
+    val navigationParams = remember { AlbumNavigationExtrasCache.consume(browseId) }
 
     val tabIndexState = rememberSaveable(saver = stateFlowSaver()) { MutableStateFlow(0) }
     val tabIndex by tabIndexState.collectAsState()
 
     var album by persist<Album?>("album/$browseId/album")
-    var albumPage by persist<Innertube.PlaylistOrAlbumPage?>("album/$browseId/albumPage")
+    var albumResult by persist<AlbumResult?>("album/$browseId/albumResult")
     var songs by persistList<Song>("album/$browseId/songs")
 
     PersistMapCleanup(prefix = "album/$browseId/")
@@ -85,10 +81,16 @@ fun AlbumScreen(browseId: String) {
                 if (currentAlbum?.timestamp != null && currentSongs.isNotEmpty()) return@combine
 
                 withContext(Dispatchers.IO) {
-                    Innertube.albumPage(BrowseBody(browseId = browseId))
-                        ?.completed()
-                        ?.onSuccess { newAlbumPage ->
-                            albumPage = newAlbumPage
+                    IntermusicProvider.shared()
+                        .getAlbum(browseId, navigationParams)
+                        .onSuccess { newAlbum ->
+                            albumResult = newAlbum
+                                            val artistSummary = newAlbum.artists
+                                                .mapNotNull { it.name.takeIf(String::isNotBlank) }
+                                                .joinToString(
+                                                    separator = ", "
+                                                )
+                                                .takeIf { it.isNotBlank() }
 
                             transaction {
                                 Database.clearAlbum(browseId)
@@ -96,32 +98,30 @@ fun AlbumScreen(browseId: String) {
                                 Database.upsert(
                                     album = Album(
                                         id = browseId,
-                                        title = newAlbumPage.title,
-                                        description = newAlbumPage.description,
-                                        thumbnailUrl = newAlbumPage.thumbnail?.url,
-                                        year = newAlbumPage.year,
-                                        authorsText = newAlbumPage.authors
-                                            ?.joinToString("") { it.name.orEmpty() },
-                                        shareUrl = newAlbumPage.url,
+                                        title = newAlbum.title,
+                                        description = newAlbum.description,
+                                        thumbnailUrl = newAlbum.thumbnails.firstOrNull()?.url,
+                                        year = newAlbum.year,
+                                                        authorsText = artistSummary,
+                                        shareUrl = "https://music.youtube.com/browse/${'$'}browseId",
                                         timestamp = System.currentTimeMillis(),
                                         bookmarkedAt = album?.bookmarkedAt,
-                                        otherInfo = newAlbumPage.otherInfo
+                                                        otherInfo = artistSummary
                                     ),
-                                    songAlbumMaps = newAlbumPage
-                                        .songsPage
-                                        ?.items
-                                        ?.map { it.asMediaItem }
-                                        ?.onEach { Database.insert(it) }
-                                        ?.mapIndexed { position, mediaItem ->
+                                    songAlbumMaps = newAlbum.tracks
+                                        .map { it.asMediaItem }
+                                        .onEach { Database.insert(it) }
+                                        .mapIndexed { position, mediaItem ->
                                             SongAlbumMap(
                                                 songId = mediaItem.mediaId,
                                                 albumId = browseId,
                                                 position = position
                                             )
-                                        } ?: emptyList()
+                                        }
                                 )
                             }
-                        }?.exceptionOrNull()?.printStackTrace()
+                        }
+                        .onFailure { it.printStackTrace() }
                 }
             }.collect()
     }
@@ -193,55 +193,22 @@ fun AlbumScreen(browseId: String) {
                 topIconButtonId = R.drawable.chevron_back,
                 onTopIconButtonClick = pop,
                 tabIndex = tabIndex,
-                onTabChange = { newTab -> tabIndexState.update { newTab } },
+                onTabChange = { newTab -> tabIndexState.update { newTab.coerceAtMost(0) } },
                 tabColumnContent = {
                     tab(0, R.string.songs, R.drawable.musical_notes, canHide = false)
-                    tab(1, R.string.other_versions, R.drawable.disc)
                 }
             ) { currentTabIndex ->
                 saveableStateHolder.SaveableStateProvider(key = currentTabIndex) {
-                    when (currentTabIndex) {
-                        0 -> AlbumSongs(
-                            songs = songs,
-                            album = album,
-                            headerContent = headerContent,
-                            thumbnailContent = thumbnailContent,
-                            afterHeaderContent = {
-                                if (album == null) PlaylistInfo(playlist = albumPage)
-                                else PlaylistInfo(playlist = album)
-                            }
-                        )
-
-                        1 -> {
-                            ItemsPage(
-                                tag = "album/$browseId/alternatives",
-                                header = headerContent,
-                                initialPlaceholderCount = 1,
-                                continuationPlaceholderCount = 1,
-                                emptyItemsText = stringResource(R.string.no_alternative_version),
-                                provider = albumPage?.let {
-                                    {
-                                        Result.success(
-                                            Innertube.ItemsPage(
-                                                items = albumPage?.otherVersions,
-                                                continuation = null
-                                            )
-                                        )
-                                    }
-                                },
-                                itemContent = { album ->
-                                    AlbumItem(
-                                        album = album,
-                                        thumbnailSize = Dimensions.thumbnails.album,
-                                        modifier = Modifier.clickable { albumRoute(album.key) }
-                                    )
-                                },
-                                itemPlaceholderContent = {
-                                    AlbumItemPlaceholder(thumbnailSize = Dimensions.thumbnails.album)
-                                }
-                            )
+                    AlbumSongs(
+                        songs = songs,
+                        album = album,
+                        headerContent = headerContent,
+                        thumbnailContent = thumbnailContent,
+                        afterHeaderContent = {
+                            if (album == null) PlaylistInfo(album = albumResult)
+                            else PlaylistInfo(playlist = album)
                         }
-                    }
+                    )
                 }
             }
         }

@@ -34,15 +34,12 @@ import com.rmusic.android.utils.playingSong
 import com.rmusic.core.data.enums.BuiltInPlaylist
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
-import com.rmusic.providers.piped.models.PlaylistPreview as PipedPlaylistPreview
-import com.rmusic.providers.piped.models.Session
 
 @Route
 @Composable
 fun HomePlaylists(
     onBuiltInPlaylist: (BuiltInPlaylist) -> Unit,
     onPlaylistClick: (Playlist) -> Unit,
-    onPipedPlaylistClick: (Session, PipedPlaylistPreview) -> Unit,
     onSearchClick: () -> Unit
 ) {
     val (colorPalette) = LocalAppearance.current

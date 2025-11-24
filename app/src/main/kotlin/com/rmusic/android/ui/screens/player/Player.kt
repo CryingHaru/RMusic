@@ -109,7 +109,6 @@ import com.rmusic.core.ui.utils.isLandscape
 import com.rmusic.core.ui.utils.px
 import com.rmusic.core.ui.utils.roundedShape
 import com.rmusic.core.ui.utils.songBundle
-import com.rmusic.providers.innertube.models.NavigationEndpoint
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.absoluteValue
@@ -654,7 +653,7 @@ private fun PlayerMenu(
         onStartRadio = {
             binder.stopRadio()
             binder.player.seamlessPlay(mediaItem)
-            binder.setupRadio(NavigationEndpoint.Endpoint.Watch(videoId = mediaItem.mediaId))
+            binder.setupRadio(mediaItem.mediaId)
         },
         onGoToEqualizer = launchEqualizer,
         onShowSleepTimer = {},

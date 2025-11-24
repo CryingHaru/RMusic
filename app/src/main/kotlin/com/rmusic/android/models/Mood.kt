@@ -3,7 +3,7 @@ package com.rmusic.android.models
 import android.os.Parcelable
 import androidx.compose.ui.graphics.Color
 import com.rmusic.core.ui.ColorParceler
-import com.rmusic.providers.innertube.Innertube
+import com.rmusic.providers.intermusic.IntermusicProvider
 import kotlinx.parcelize.Parcelize
 import kotlinx.parcelize.WriteWith
 
@@ -15,9 +15,9 @@ data class Mood(
     val params: String?
 ) : Parcelable
 
-fun Innertube.Mood.Item.toUiMood() = Mood(
+fun IntermusicProvider.MoodItem.toUiMood() = Mood(
     name = title,
     color = Color(stripeColor),
-    browseId = endpoint.browseId,
-    params = endpoint.params
+    browseId = browseId,
+    params = params
 )

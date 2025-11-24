@@ -58,7 +58,6 @@ import com.rmusic.android.ui.items.SongItem
 import com.rmusic.android.utils.PlaylistDownloadIcon
 import com.rmusic.android.utils.PlaylistDownloadIconSpecific
 import com.rmusic.android.utils.asMediaItem
-import com.rmusic.android.utils.completed
 import com.rmusic.android.utils.enqueue
 import com.rmusic.android.utils.forcePlayAtIndex
 import com.rmusic.android.utils.forcePlayFromBeginning
@@ -71,9 +70,7 @@ import com.rmusic.compose.reordering.rememberReorderingState
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.utils.isLandscape
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.BrowseBody
-import com.rmusic.providers.innertube.requests.playlistPage
+import com.rmusic.providers.intermusic.IntermusicProvider
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CancellationException
@@ -340,26 +337,28 @@ private suspend fun sync(
     playlist: Playlist,
     browseId: String
 ) = runCatching {
-    Innertube.playlistPage(
-        BrowseBody(browseId = browseId)
-    )?.completed()?.getOrNull()?.let { remotePlaylist ->
-        transaction {
-            Database.clearPlaylist(playlist.id)
+    IntermusicProvider.shared()
+        .getPlaylist(browseId)
+        .getOrNull()
+        ?.tracks
+        ?.takeIf { it.isNotEmpty() }
+        ?.map { it.asMediaItem }
+        ?.let { mediaItems ->
+            transaction {
+                Database.clearPlaylist(playlist.id)
 
-            remotePlaylist.songsPage
-                ?.items
-                ?.map { it.asMediaItem }
-                ?.onEach { Database.insert(it) }
-                ?.mapIndexed { position, mediaItem ->
-                    SongPlaylistMap(
-                        songId = mediaItem.mediaId,
-                        playlistId = playlist.id,
-                        position = position
-                    )
-                }
-                ?.let(Database::insertSongPlaylistMaps)
+                mediaItems
+                    .onEach { Database.insert(it) }
+                    .mapIndexed { position, mediaItem ->
+                        SongPlaylistMap(
+                            songId = mediaItem.mediaId,
+                            playlistId = playlist.id,
+                            position = position
+                        )
+                    }
+                    .let(Database::insertSongPlaylistMaps)
+            }
         }
-    }
 }.onFailure {
     if (it is CancellationException) throw it
     it.printStackTrace()

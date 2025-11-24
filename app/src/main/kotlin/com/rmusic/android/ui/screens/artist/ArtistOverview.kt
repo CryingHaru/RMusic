@@ -41,6 +41,7 @@ import com.rmusic.android.ui.items.SongItem
 import com.rmusic.android.ui.items.SongItemPlaceholder
 import com.rmusic.android.utils.asMediaItem
 import com.rmusic.android.utils.forcePlay
+import com.rmusic.android.utils.forcePlayFromBeginning
 import com.rmusic.android.utils.medium
 import com.rmusic.android.utils.playingSong
 import com.rmusic.android.utils.secondary
@@ -48,8 +49,9 @@ import com.rmusic.android.utils.semiBold
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.utils.isLandscape
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.NavigationEndpoint
+import com.rmusic.providers.intermusic.pages.ArtistResult
+import com.rmusic.providers.intermusic.pages.AlbumItem as InterAlbumItem
+import com.rmusic.providers.intermusic.pages.SongItem as InterSongItem
 
 private val sectionTextModifier = Modifier
     .padding(horizontal = 16.dp)
@@ -58,10 +60,10 @@ private val sectionTextModifier = Modifier
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ArtistOverview(
-    youtubeArtistPage: Innertube.ArtistPage?,
-    onViewAllSongsClick: () -> Unit,
-    onViewAllAlbumsClick: () -> Unit,
-    onViewAllSinglesClick: () -> Unit,
+    artist: ArtistResult?,
+    onViewAllSongsClick: (() -> Unit)?,
+    onViewAllAlbumsClick: (() -> Unit)?,
+    onViewAllSinglesClick: (() -> Unit)?,
     onAlbumClick: (String) -> Unit,
     thumbnailContent: @Composable () -> Unit,
     headerContent: @Composable (textButton: (@Composable () -> Unit)?) -> Unit,
@@ -78,6 +80,7 @@ fun ArtistOverview(
     val endPaddingValues = windowInsets.only(WindowInsetsSides.End).asPaddingValues()
 
     val scrollState = rememberScrollState()
+    val songs = artist?.songs.orEmpty()
 
     Box {
         Column(
@@ -94,16 +97,19 @@ fun ArtistOverview(
         ) {
             Box(modifier = Modifier.padding(endPaddingValues)) {
                 headerContent {
-                    youtubeArtistPage?.shuffleEndpoint?.let { endpoint ->
+                    songs.takeIf { it.isNotEmpty() }?.let { availableSongs ->
                         SecondaryTextButton(
                             text = stringResource(R.string.shuffle),
                             onClick = {
-                                binder?.stopRadio()
-                                binder?.playRadio(endpoint)
+                                val mediaItems = availableSongs.shuffled().map(InterSongItem::asMediaItem)
+                                if (mediaItems.isNotEmpty()) {
+                                    binder?.stopRadio()
+                                    binder?.player?.forcePlayFromBeginning(mediaItems)
+                                }
                             }
                         )
                     }
-                    youtubeArtistPage?.subscribersCountText?.let { subscribers ->
+                    artist?.subscribers?.let { subscribers ->
                         BasicText(
                             text = stringResource(R.string.format_subscribers, subscribers),
                             style = typography.xxs.medium
@@ -114,8 +120,8 @@ fun ArtistOverview(
 
             if (!isLandscape) thumbnailContent()
 
-            youtubeArtistPage?.let { artist ->
-                artist.songs?.let { songs ->
+            artist?.let { current ->
+                if (songs.isNotEmpty()) {
                     Row(
                         verticalAlignment = Alignment.Bottom,
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -129,11 +135,11 @@ fun ArtistOverview(
                             modifier = sectionTextModifier
                         )
 
-                        artist.songsEndpoint?.let {
+                        onViewAllSongsClick?.let {
                             BasicText(
                                 text = stringResource(R.string.view_all),
                                 style = typography.xs.secondary,
-                                modifier = sectionTextModifier.clickable(onClick = onViewAllSongsClick)
+                                modifier = sectionTextModifier.clickable(onClick = it)
                             )
                         }
                     }
@@ -141,8 +147,9 @@ fun ArtistOverview(
                     val (currentMediaId, playing) = playingSong(binder)
 
                     songs.forEach { song ->
+                        val mediaItem = song.asMediaItem
                         SongItem(
-                            song = song,
+                            song = mediaItem,
                             thumbnailSize = Dimensions.thumbnails.song,
                             modifier = Modifier
                                 .combinedClickable(
@@ -150,26 +157,23 @@ fun ArtistOverview(
                                         menuState.display {
                                             NonQueuedMediaItemMenu(
                                                 onDismiss = menuState::hide,
-                                                mediaItem = song.asMediaItem
+                                                mediaItem = mediaItem
                                             )
                                         }
                                     },
                                     onClick = {
-                                        val mediaItem = song.asMediaItem
                                         binder?.stopRadio()
                                         binder?.player?.forcePlay(mediaItem)
-                                        binder?.setupRadio(
-                                            NavigationEndpoint.Endpoint.Watch(videoId = mediaItem.mediaId)
-                                        )
+                                        binder?.setupRadio(mediaItem.mediaId)
                                     }
                                 )
                                 .padding(endPaddingValues),
-                            isPlaying = playing && currentMediaId == song.key
+                            isPlaying = playing && currentMediaId == mediaItem.mediaId
                         )
                     }
                 }
 
-                artist.albums?.let { albums ->
+                current.albums.takeIf { it.isNotEmpty() }?.let { albums ->
                     Row(
                         verticalAlignment = Alignment.Bottom,
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -183,11 +187,11 @@ fun ArtistOverview(
                             modifier = sectionTextModifier
                         )
 
-                        artist.albumsEndpoint?.let {
+                        onViewAllAlbumsClick?.let {
                             BasicText(
                                 text = stringResource(R.string.view_all),
                                 style = typography.xs.secondary,
-                                modifier = sectionTextModifier.clickable(onClick = onViewAllAlbumsClick)
+                                modifier = sectionTextModifier.clickable(onClick = it)
                             )
                         }
                     }
@@ -198,21 +202,21 @@ fun ArtistOverview(
                     ) {
                         items(
                             items = albums,
-                            key = Innertube.AlbumItem::key
+                            key = { it.browseId }
                         ) { album ->
                             AlbumItem(
                                 album = album,
                                 thumbnailSize = Dimensions.thumbnails.album,
                                 alternative = true,
                                 modifier = Modifier.clickable {
-                                    onAlbumClick(album.key)
+                                    album.browseId.let(onAlbumClick)
                                 }
                             )
                         }
                     }
                 }
 
-                artist.singles?.let { singles ->
+                current.singles.takeIf { it.isNotEmpty() }?.let { singles ->
                     Row(
                         verticalAlignment = Alignment.Bottom,
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -226,11 +230,11 @@ fun ArtistOverview(
                             modifier = sectionTextModifier
                         )
 
-                        artist.singlesEndpoint?.let {
+                        onViewAllSinglesClick?.let {
                             BasicText(
                                 text = stringResource(R.string.view_all),
                                 style = typography.xs.secondary,
-                                modifier = sectionTextModifier.clickable(onClick = onViewAllSinglesClick)
+                                modifier = sectionTextModifier.clickable(onClick = it)
                             )
                         }
                     }
@@ -241,19 +245,21 @@ fun ArtistOverview(
                     ) {
                         items(
                             items = singles,
-                            key = Innertube.AlbumItem::key
+                            key = { it.browseId }
                         ) { album ->
                             AlbumItem(
                                 album = album,
                                 thumbnailSize = Dimensions.thumbnails.album,
                                 alternative = true,
-                                modifier = Modifier.clickable(onClick = { onAlbumClick(album.key) })
+                                modifier = Modifier.clickable {
+                                    album.browseId.let(onAlbumClick)
+                                }
                             )
                         }
                     }
                 }
 
-                artist.description?.let { description ->
+                current.description?.let { description ->
                     Attribution(
                         text = description,
                         modifier = Modifier
@@ -261,21 +267,22 @@ fun ArtistOverview(
                             .padding(vertical = 16.dp, horizontal = 8.dp)
                     )
                 }
-
-                Unit
             } ?: ArtistOverviewBodyPlaceholder()
         }
 
-        youtubeArtistPage?.radioEndpoint?.let { endpoint ->
-            FloatingActionsContainerWithScrollToTop(
-                scrollState = scrollState,
-                icon = R.drawable.radio,
-                onClick = {
-                    binder?.stopRadio()
-                    binder?.playRadio(endpoint)
+        FloatingActionsContainerWithScrollToTop(
+            scrollState = scrollState,
+            icon = R.drawable.shuffle,
+            onClick = {
+                if (songs.isNotEmpty()) {
+                    val mediaItems = songs.shuffled().map(InterSongItem::asMediaItem)
+                    if (mediaItems.isNotEmpty()) {
+                        binder?.stopRadio()
+                        binder?.player?.forcePlayFromBeginning(mediaItems)
+                    }
                 }
-            )
-        }
+            }
+        )
     }
 }
 

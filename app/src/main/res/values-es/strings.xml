@@ -451,4 +451,7 @@
     <string name="downloads_active">%1$d descargas activas</string>
     <string name="downloads_in_progress_count">%1$d descargas en progreso</string>
     <string name="download_service">Servicio de descarga</string>
+    <string name="debug_console_title">Consola de depuración</string>
+    <string name="clear_action">Limpiar</string>
+    <string name="copy_action">Copiar</string>
 </resources>

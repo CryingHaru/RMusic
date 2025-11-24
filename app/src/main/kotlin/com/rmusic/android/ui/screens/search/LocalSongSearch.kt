@@ -41,7 +41,6 @@ import com.rmusic.android.utils.playingSong
 import com.rmusic.compose.persist.persistList
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
-import com.rmusic.providers.innertube.models.NavigationEndpoint
 import kotlinx.collections.immutable.toImmutableList
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -121,9 +120,7 @@ fun LocalSongSearch(
                                 val mediaItem = song.asMediaItem
                                 binder?.stopRadio()
                                 binder?.player?.forcePlay(mediaItem)
-                                binder?.setupRadio(
-                                    NavigationEndpoint.Endpoint.Watch(videoId = mediaItem.mediaId)
-                                )
+                                binder?.setupRadio(mediaItem.mediaId)
                             }
                         )
                         .animateItem(),

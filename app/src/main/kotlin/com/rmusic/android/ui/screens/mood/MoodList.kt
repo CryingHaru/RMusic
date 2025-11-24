@@ -42,13 +42,9 @@ import com.rmusic.android.utils.semiBold
 import com.rmusic.compose.persist.persist
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.BrowseBody
-import com.rmusic.providers.innertube.requests.BrowseResult
-import com.rmusic.providers.innertube.requests.browse
+import com.rmusic.providers.intermusic.IntermusicProvider
+import com.rmusic.providers.intermusic.pages.SearchResult
 import com.valentinilk.shimmer.shimmer
-
-private const val DEFAULT_BROWSE_ID = "FEmusic_moods_and_genres_category"
 
 @Composable
 fun MoodList(
@@ -58,15 +54,15 @@ fun MoodList(
     val (colorPalette, typography) = LocalAppearance.current
     val windowInsets = LocalPlayerAwareWindowInsets.current
 
-    val browseId = mood.browseId ?: DEFAULT_BROWSE_ID
-    var moodPage by persist<Result<BrowseResult>>(
-        tag = "playlist/mood/$browseId${mood.params?.let { "/$it" }.orEmpty()}"
+    val browseKey = mood.browseId ?: mood.name
+    var moodSearch by persist<Result<SearchResult>>(
+        tag = "playlist/mood/$browseKey${mood.params?.let { "/$it" }.orEmpty()}"
     )
 
-    LaunchedEffect(Unit) {
-        if (moodPage?.isSuccess == true) return@LaunchedEffect
+    LaunchedEffect(browseKey, mood.name) {
+        if (moodSearch?.isSuccess == true) return@LaunchedEffect
 
-        moodPage = Innertube.browse(BrowseBody(browseId = browseId, params = mood.params))
+        moodSearch = IntermusicProvider.shared().search(mood.name)
     }
 
     val lazyListState = rememberLazyListState()
@@ -84,7 +80,7 @@ fun MoodList(
         .padding(top = 24.dp, bottom = 8.dp)
         .padding(endPaddingValues)
 
-    moodPage?.getOrNull()?.let { moodResult ->
+    moodSearch?.getOrNull()?.let { moodResult ->
         LazyColumn(
             state = lazyListState,
             contentPadding = contentPadding,
@@ -100,70 +96,95 @@ fun MoodList(
                     Header(title = mood.name)
                 }
             }
-
-            moodResult.items.forEach { item ->
-                item {
+            if (moodResult.albums.isNotEmpty()) {
+                item(key = "albums_header") {
                     BasicText(
-                        text = item.title.orEmpty(),
+                        text = stringResource(R.string.albums),
                         style = typography.m.semiBold,
                         modifier = sectionTextModifier
                     )
                 }
-                item {
+                item(key = "albums_list") {
                     LazyRow {
                         items(
-                            items = item.items,
-                            key = { it.key }
-                        ) { childItem ->
-                            if (childItem.key == DEFAULT_BROWSE_ID) return@items
-
-                            when (childItem) {
-                                is Innertube.AlbumItem -> AlbumItem(
-                                    album = childItem,
-                                    thumbnailSize = Dimensions.thumbnails.album,
-                                    alternative = true,
-                                    modifier = Modifier.clickable {
-                                        childItem.info?.endpoint?.browseId?.let {
-                                            albumRoute.global(it)
-                                        }
+                            items = moodResult.albums,
+                            key = { it.browseId }
+                        ) { album ->
+                            AlbumItem(
+                                album = album,
+                                thumbnailSize = Dimensions.thumbnails.album,
+                                alternative = true,
+                                modifier = Modifier.clickable {
+                                    album.browseId.takeUnless { it.isNullOrEmpty() }?.let {
+                                        albumRoute.global(it)
                                     }
-                                )
+                                }
+                            )
+                        }
+                    }
+                }
+            }
 
-                                is Innertube.ArtistItem -> ArtistItem(
-                                    artist = childItem,
-                                    thumbnailSize = Dimensions.thumbnails.album,
-                                    alternative = true,
-                                    modifier = Modifier.clickable {
-                                        childItem.info?.endpoint?.browseId?.let {
-                                            artistRoute.global(it)
-                                        }
-                                    }
-                                )
+            if (moodResult.artists.isNotEmpty()) {
+                item(key = "artists_header") {
+                    BasicText(
+                        text = stringResource(R.string.artists),
+                        style = typography.m.semiBold,
+                        modifier = sectionTextModifier
+                    )
+                }
+                item(key = "artists_list") {
+                    LazyRow {
+                        items(
+                            items = moodResult.artists,
+                            key = { it.browseId ?: it.name }
+                        ) { artist ->
+                            ArtistItem(
+                                artist = artist,
+                                thumbnailSize = Dimensions.thumbnails.album,
+                                alternative = true,
+                                modifier = Modifier.clickable {
+                                    artist.browseId?.let { artistRoute.global(it) }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
 
-                                is Innertube.PlaylistItem -> PlaylistItem(
-                                    playlist = childItem,
-                                    thumbnailSize = Dimensions.thumbnails.album,
-                                    alternative = true,
-                                    modifier = Modifier.clickable {
-                                        childItem.info?.endpoint?.let { endpoint ->
-                                            playlistRoute.global(
-                                                p0 = endpoint.browseId ?: return@clickable,
-                                                p1 = endpoint.params,
-                                                p2 = childItem.songCount?.let { it / 100 },
-                                                p3 = true
-                                            )
-                                        }
-                                    }
-                                )
-
-                                else -> {}
-                            }
+            if (moodResult.playlists.isNotEmpty()) {
+                item(key = "playlists_header") {
+                    BasicText(
+                        text = stringResource(R.string.playlists),
+                        style = typography.m.semiBold,
+                        modifier = sectionTextModifier
+                    )
+                }
+                item(key = "playlists_list") {
+                    LazyRow {
+                        items(
+                            items = moodResult.playlists,
+                            key = { it.browseId }
+                        ) { playlist ->
+                            PlaylistItem(
+                                playlist = playlist,
+                                thumbnailSize = Dimensions.thumbnails.album,
+                                alternative = true,
+                                modifier = Modifier.clickable {
+                                    playlistRoute.global(
+                                        p0 = playlist.browseId,
+                                        p1 = null,
+                                        p2 = playlist.songCount?.let { it / 100 },
+                                        p3 = true
+                                    )
+                                }
+                            )
                         }
                     }
                 }
             }
         }
-    } ?: moodPage?.exceptionOrNull()?.let {
+    } ?: moodSearch?.exceptionOrNull()?.let {
         BasicText(
             text = stringResource(R.string.error_message),
             style = typography.s.secondary.center,

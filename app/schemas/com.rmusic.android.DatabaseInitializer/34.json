@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 34,
-    "identityHash": "00b97fe80e4b962f72dce1a7f2caf3a5",
+    "identityHash": "d1f650d5a1834125c6a7b6c8b82d5860",
     "entities": [
       {
         "tableName": "Song",
@@ -892,54 +892,6 @@
         ]
       },
       {
-        "tableName": "PipedSession",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `apiBaseUrl` TEXT NOT NULL, `token` TEXT NOT NULL, `username` TEXT NOT NULL)",
-        "fields": [
-          {
-            "fieldPath": "id",
-            "columnName": "id",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "apiBaseUrl",
-            "columnName": "apiBaseUrl",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "token",
-            "columnName": "token",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "username",
-            "columnName": "username",
-            "affinity": "TEXT",
-            "notNull": true
-          }
-        ],
-        "primaryKey": {
-          "autoGenerate": true,
-          "columnNames": [
-            "id"
-          ]
-        },
-        "indices": [
-          {
-            "name": "index_PipedSession_apiBaseUrl_username",
-            "unique": true,
-            "columnNames": [
-              "apiBaseUrl",
-              "username"
-            ],
-            "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_PipedSession_apiBaseUrl_username` ON `${TABLE_NAME}` (`apiBaseUrl`, `username`)"
-          }
-        ]
-      },
-      {
         "tableName": "downloads",
         "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `artist` TEXT, `album` TEXT, `thumbnailUrl` TEXT, `duration` INTEGER, `url` TEXT NOT NULL, `filePath` TEXT NOT NULL, `state` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
@@ -1016,7 +968,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '00b97fe80e4b962f72dce1a7f2caf3a5')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd1f650d5a1834125c6a7b6c8b82d5860')"
     ]
   }
 }

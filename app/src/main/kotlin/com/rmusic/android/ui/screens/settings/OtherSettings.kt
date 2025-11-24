@@ -40,6 +40,7 @@ import com.rmusic.android.R
 import com.rmusic.android.preferences.AppearancePreferences
 import com.rmusic.android.preferences.DataPreferences
 import com.rmusic.android.preferences.PlayerPreferences
+import com.rmusic.android.preferences.QuickPicksSnapshot
 import com.rmusic.android.query
 import com.rmusic.android.service.PlayerMediaBrowserService
 import com.rmusic.android.service.PrecacheService
@@ -47,6 +48,7 @@ import com.rmusic.android.ui.components.themed.SecondaryTextButton
 import com.rmusic.android.ui.components.themed.SliderDialog
 import com.rmusic.android.ui.components.themed.SliderDialogBody
 import com.rmusic.android.ui.screens.Route
+import com.rmusic.android.ui.screens.loginRoute
 import com.rmusic.android.ui.screens.logsRoute
 import com.rmusic.android.utils.findActivity
 import com.rmusic.android.utils.intent
@@ -109,6 +111,28 @@ fun OtherSettings() {
         title = stringResource(R.string.other),
         scrollState = scrollState
     ) {
+        SettingsGroup(
+            title = "Account",
+            description = "Login to YouTube Music to access your library",
+            trailingContent = {
+                SecondaryTextButton(
+                    text = if (DataPreferences.cookies.isNotEmpty()) "Logout" else "Login",
+                    onClick = {
+                        if (DataPreferences.cookies.isNotEmpty()) {
+                            DataPreferences.cookies = ""
+                            DataPreferences.authUser = "0"
+                            DataPreferences.pageId = ""
+                            DataPreferences.quickPicksSnapshot = QuickPicksSnapshot()
+                            com.rmusic.providers.intermusic.IntermusicProvider.shared().logout()
+                            context.toast("Logged out")
+                        } else {
+                            loginRoute.global()
+                        }
+                    }
+                )
+            }
+        ) {}
+
         SettingsGroup(title = stringResource(R.string.android_auto)) {
             SwitchSettingsEntry(
                 title = stringResource(R.string.android_auto),

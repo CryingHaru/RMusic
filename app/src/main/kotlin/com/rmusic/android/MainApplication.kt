@@ -87,7 +87,6 @@ import com.rmusic.android.utils.DisposableListener
 import com.rmusic.android.utils.KeyedCrossfade
 import com.rmusic.android.utils.LocalMonetCompat
 // deduped import remains above
-import com.rmusic.providers.intermusic.pages.SongResult as InterSongResult
 import com.rmusic.android.utils.collectProvidedBitmapAsState
 import com.rmusic.android.utils.forcePlay
 import com.rmusic.android.utils.intent
@@ -112,12 +111,9 @@ import com.rmusic.core.ui.shimmerTheme
 import com.rmusic.core.ui.utils.activityIntentBundle
 import com.rmusic.core.ui.utils.isAtLeastAndroid12
 import com.rmusic.core.ui.utils.songBundle
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.BrowseBody
-import com.rmusic.providers.innertube.requests.playlistPage
 import com.rmusic.providers.intermusic.IntermusicProvider
-import com.rmusic.android.utils.asMediaItem
-import com.rmusic.providers.innertube.requests.song
+import com.rmusic.providers.intermusic.pages.SongResult
+import com.rmusic.android.utils.toMediaItem
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -506,17 +502,22 @@ fun handleUrl(
             "playlist" -> uri.getQueryParameter("list")?.let { playlistId ->
                 val browseId = "VL$playlistId"
 
-                if (playlistId.startsWith("OLAK5uy_")) Innertube.playlistPage(
-                    body = BrowseBody(browseId = browseId)
-                )
-                    ?.getOrNull()
-                    ?.let { page ->
-                        page.songsPage?.items?.firstOrNull()?.album?.endpoint?.browseId
+                if (playlistId.startsWith("OLAK5uy_")) {
+                    val intermusicProvider = IntermusicProvider.shared()
+                    val playlistResult = withContext(Dispatchers.IO) {
+                        intermusicProvider.getPlaylist(playlistId).getOrNull()
+                    }
+
+                    if (playlistResult != null) {
+                        playlistResult.tracks.firstOrNull()?.album?.browseId
                             ?.let { albumRoute.ensureGlobal(it) }
-                    } ?: withContext(Dispatchers.Main) {
-                    toast(getString(R.string.error_url, uri))
-                }
-                else playlistRoute.ensureGlobal(
+                            ?: withContext(Dispatchers.Main) {
+                                toast(getString(R.string.error_url, uri))
+                            }
+                    } else withContext(Dispatchers.Main) {
+                        toast(getString(R.string.error_url, uri))
+                    }
+                } else playlistRoute.ensureGlobal(
                     p0 = browseId,
                     p1 = uri.getQueryParameter("params"),
                     p2 = null,
@@ -540,15 +541,13 @@ fun handleUrl(
                     }?.let { videoId ->
                         // Prefer Intermusic provider first
                         val intermusicProvider = IntermusicProvider.shared()
-                        val intermusicSong = intermusicProvider.getPlayer(videoId).getOrNull()
-                        if (intermusicSong != null) withContext(Dispatchers.Main) {
-                            binder?.player?.let { player -> player.forcePlay((intermusicSong as InterSongResult).asMediaItem) }
-                        } else {
-                            Innertube.song(videoId)?.getOrNull()?.let { song ->
-                                withContext(Dispatchers.Main) {
-                                    binder?.player?.let { p -> p.forcePlay(song.asMediaItem) }
-                                }
+                        val intermusicSong: SongResult? = intermusicProvider.getPlayer(videoId).getOrNull()
+                        intermusicSong?.let { result ->
+                            withContext(Dispatchers.Main) {
+                                binder?.player?.let { player -> player.forcePlay(result.toMediaItem()) }
                             }
+                        } ?: withContext(Dispatchers.Main) {
+                            toast(getString(R.string.error_url, uri))
                         }
             }
         }
@@ -635,6 +634,9 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
                 .build()
         )
 
+        // if (BuildConfig.DEBUG) {
+        //    IntermusicProvider.installDebugTracer(IntermusicAuthDebugConsole)
+        // }
         MonetCompat.debugLog = BuildConfig.DEBUG
         super.onCreate()
 
@@ -655,6 +657,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
                 vdPrefs.getString(KEY_VISITOR_DATA, null)?.let { provider.visitorData = it }
 
                 // 2) Restaurar sesión si hay estado guardado
+                if (DataPreferences.cookies.isNotEmpty()) {
+                    val pageId = DataPreferences.pageId.takeIf { it.isNotEmpty() }
+                    val idToken = DataPreferences.idToken.takeIf { it.isNotEmpty() }
+                    provider.login(DataPreferences.cookies, DataPreferences.authUser, pageId, idToken)
+                }
+                /*
                 if (!provider.isLoggedIn()) {
                     val prefs = getSharedPreferences(PREFS_INTERMUSIC_AUTH, Context.MODE_PRIVATE).also {
                         migrateLegacySessionState(it)
@@ -668,6 +676,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, Configurati
                         provider.importSessionData(state)
                     }
                 }
+                */
 
                 // 3) Asegurar visitorData para funcionamiento básico si aún falta y persistirla
                 if (provider.visitorData.isNullOrBlank()) {

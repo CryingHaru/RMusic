@@ -21,11 +21,6 @@ import com.rmusic.android.utils.intent
 import com.rmusic.android.MainActivity
 import com.rmusic.android.utils.InvincibleService
 import com.rmusic.android.utils.thumbnail
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.PlayerBody
-import com.rmusic.providers.innertube.requests.artistPage
-import com.rmusic.providers.innertube.requests.player
-import com.rmusic.providers.innertube.models.bodies.BrowseBody
 import com.rmusic.android.service.ServiceNotifications
 import com.rmusic.android.workers.DownloadWorker
 import com.rmusic.download.DownloadManager
@@ -34,6 +29,7 @@ import com.rmusic.download.HttpDownloadProvider
 import com.rmusic.download.KDownloadProvider
 import com.rmusic.download.models.DownloadItem
 import com.rmusic.download.DownloadProvider
+import com.rmusic.providers.intermusic.IntermusicProvider
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.statement.readRawBytes
@@ -140,7 +136,7 @@ class MusicDownloadService : InvincibleService() {
         android.util.Log.d(TAG, "Music directory: ${musicDir.absolutePath}")
         
         val providers: Map<String, DownloadProvider> = mapOf(
-            "innertube" to HttpDownloadProvider(httpClient),
+            "intermusic" to HttpDownloadProvider(httpClient),
             "http" to HttpDownloadProvider(httpClient),
             "kdownloader" to KDownloadProvider(this) // Add KDownloadProvider
         )
@@ -254,7 +250,7 @@ class MusicDownloadService : InvincibleService() {
                 return@launch
             }
 
-            android.util.Log.d(TAG, "Force re-fetching URL from Innertube for ${song.title}")
+            android.util.Log.d(TAG, "Force re-fetching URL from Intermusic for ${song.title}")
             val newUrl = generateStreamingUrl(song, forceRefresh = true)
 
             if (newUrl == null) {
@@ -519,15 +515,15 @@ class MusicDownloadService : InvincibleService() {
             var artistThumbnailUrl = dbArtist?.thumbnailUrl
 
             if (artistThumbnailUrl == null) {
-                android.util.Log.d(TAG, "Fetching artist thumbnail from Innertube for: ${artistInfo.name}")
+                android.util.Log.d(TAG, "Fetching artist thumbnail from Intermusic for: ${artistInfo.name}")
                 try {
-                    val artistPageResult = Innertube.artistPage(BrowseBody(browseId = artistId))?.getOrNull()
-                    artistThumbnailUrl = artistPageResult?.thumbnail?.url
+                    val artistResult = IntermusicProvider.shared().getArtist(artistId).getOrNull()
+                    artistThumbnailUrl = artistResult?.thumbnails?.firstOrNull()?.url
                     if (artistThumbnailUrl != null) {
                         android.util.Log.d(TAG, "Found artist thumbnail URL: $artistThumbnailUrl")
                     }
                 } catch (e: Exception) {
-                    android.util.Log.w(TAG, "Failed to fetch artist thumbnail from Innertube", e)
+                    android.util.Log.w(TAG, "Failed to fetch artist thumbnail from Intermusic", e)
                 }
             }
 
@@ -1092,22 +1088,25 @@ class MusicDownloadService : InvincibleService() {
                 }
             }
 
-            // If not in database or force-refresh, fetch from Innertube, but with a delay to avoid rate-limiting
+            // If not in database or force-refresh, fetch from Intermusic, but with a delay to avoid rate-limiting
             kotlinx.coroutines.delay(1500)
             
-            Innertube.player(PlayerBody(videoId = song.id))?.getOrNull()?.let { playerResponse ->
-                val bestFormat = playerResponse.streamingData?.adaptiveFormats
-                    ?.filter { it.mimeType.contains("audio/mp4") && it.bitrate != null && it.url != null }
-                    ?.maxByOrNull { it.bitrate!! }
+            val intermusicProvider = IntermusicProvider.shared()
+            intermusicProvider.getBestAudioStream(song.id).getOrNull()?.let { streamInfo ->
+                val url = streamInfo.url
+                if (!url.isNullOrBlank()) {
+                    val resolvedBitrate = streamInfo.bitrate ?: streamInfo.averageBitrate
+                    val resolvedContentLength = streamInfo.contentLength?.toLongOrNull()
 
-                bestFormat?.url?.let { url ->
-                    // Save the fetched format to the database for future use
                     Database.insert(
                         com.rmusic.android.models.Format(
                             songId = song.id,
                             url = url,
-                            bitrate = bestFormat.bitrate,
-                            contentLength = bestFormat.contentLength
+                            bitrate = resolvedBitrate?.toLong(),
+                            contentLength = resolvedContentLength,
+                            itag = streamInfo.itag,
+                            mimeType = streamInfo.mimeType,
+                            loudnessDb = streamInfo.loudnessDb
                         )
                     )
                     return url

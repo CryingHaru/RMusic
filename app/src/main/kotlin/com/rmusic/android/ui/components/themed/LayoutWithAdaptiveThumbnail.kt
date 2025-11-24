@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.rmusic.android.utils.thumbnail
 import com.rmusic.core.ui.Dimensions
@@ -54,14 +55,25 @@ fun adaptiveThumbnailContent(
             .clip(shape ?: thumbnailShape)
             .size(thumbnailSize)
 
-        if (isLoading) Spacer(
-            modifier = innerModifier
-                .shimmer()
-                .background(colorPalette.shimmer)
-        ) else AsyncImage(
-            model = url?.thumbnail(thumbnailSize.px),
-            contentDescription = null,
-            modifier = innerModifier.background(colorPalette.background1)
-        )
+        val model = url?.thumbnail(thumbnailSize.px)
+        if (isLoading) {
+            Spacer(
+                modifier = innerModifier
+                    .shimmer()
+                    .background(colorPalette.shimmer)
+            )
+        } else if (model != null) {
+            AsyncImage(
+                model = model,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = innerModifier.background(colorPalette.background1)
+            )
+        } else {
+            Spacer(
+                modifier = innerModifier
+                    .background(colorPalette.background1)
+            )
+        }
     }
 }

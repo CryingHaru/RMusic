@@ -42,7 +42,6 @@ import com.rmusic.android.models.EventWithSong
 import com.rmusic.android.models.Format
 import com.rmusic.android.models.Info
 import com.rmusic.android.models.Lyrics
-import com.rmusic.android.models.PipedSession
 import com.rmusic.android.models.Playlist
 import com.rmusic.android.models.PlaylistPreview
 import com.rmusic.android.models.PlaylistWithSongs
@@ -413,9 +412,6 @@ interface Database {
     @Query("UPDATE Song SET totalPlayTimeMs = totalPlayTimeMs + :addition WHERE id = :id")
     fun incrementTotalPlayTimeMs(id: String, addition: Long)
 
-    @Query("SELECT * FROM PipedSession")
-    fun pipedSessions(): Flow<List<PipedSession>>
-
     @Query("SELECT * FROM Playlist WHERE id = :id")
     fun playlist(id: Long): Flow<Playlist?>
 
@@ -766,9 +762,6 @@ interface Database {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     fun insert(artists: List<Artist>, songArtistMaps: List<SongArtistMap>)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    fun insert(pipedSession: PipedSession)
-
     @Transaction
     fun insert(mediaItem: MediaItem, block: (Song) -> Song = { it }) {
         val extras = mediaItem.mediaMetadata.extras?.songBundle
@@ -843,9 +836,6 @@ interface Database {
     @Delete
     fun delete(songPlaylistMap: SongPlaylistMap)
 
-    @Delete
-    fun delete(pipedSession: PipedSession)
-
     @RawQuery
     fun raw(supportSQLiteQuery: SupportSQLiteQuery): Int
 
@@ -871,42 +861,11 @@ interface Database {
         Format::class,
         Event::class,
         Lyrics::class,
-        PipedSession::class,
         DownloadItem::class
     ],
     views = [SortedSongPlaylistMap::class],
-    version = 34,
-    exportSchema = true,
-    autoMigrations = [
-        AutoMigration(from = 1, to = 2),
-        AutoMigration(from = 2, to = 3),
-        AutoMigration(from = 3, to = 4, spec = DatabaseInitializer.From3To4Migration::class),
-        AutoMigration(from = 4, to = 5),
-        AutoMigration(from = 5, to = 6),
-        AutoMigration(from = 6, to = 7),
-        AutoMigration(from = 7, to = 8, spec = DatabaseInitializer.From7To8Migration::class),
-        AutoMigration(from = 9, to = 10),
-        AutoMigration(from = 11, to = 12, spec = DatabaseInitializer.From11To12Migration::class),
-        AutoMigration(from = 12, to = 13),
-        AutoMigration(from = 13, to = 14),
-        AutoMigration(from = 15, to = 16),
-        AutoMigration(from = 16, to = 17),
-        AutoMigration(from = 17, to = 18),
-        AutoMigration(from = 18, to = 19),
-        AutoMigration(from = 19, to = 20),
-        AutoMigration(from = 20, to = 21, spec = DatabaseInitializer.From20To21Migration::class),
-        AutoMigration(from = 21, to = 22, spec = DatabaseInitializer.From21To22Migration::class),
-        AutoMigration(from = 23, to = 24),
-        AutoMigration(from = 24, to = 25),
-        AutoMigration(from = 25, to = 26),
-        AutoMigration(from = 26, to = 27),
-        AutoMigration(from = 27, to = 28),
-        AutoMigration(from = 28, to = 29),
-        AutoMigration(from = 29, to = 30),
-        AutoMigration(from = 30, to = 31),
-        AutoMigration(from = 31, to = 32),
-        AutoMigration(from = 32, to = 33)
-    ]
+    version = 1,
+    exportSchema = true
 )
 @TypeConverters(Converters::class, DownloadStateConverter::class)
 abstract class DatabaseInitializer protected constructor() : RoomDatabase() {
@@ -923,14 +882,7 @@ abstract class DatabaseInitializer protected constructor() : RoomDatabase() {
                 klass = DatabaseInitializer::class.java,
                 name = "data.db"
             )
-            .addMigrations(
-                From8To9Migration(),
-                From10To11Migration(),
-                From14To15Migration(),
-                From22To23Migration(),
-                From23To24Migration(),
-                From33To34Migration()
-            )
+            .fallbackToDestructiveMigration()
             .build()
 
         operator fun invoke() {

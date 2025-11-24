@@ -119,3 +119,25 @@ data class AudioFormat(
     val audioSampleRate: String? = null,
     val audioChannels: Int? = null,
 )
+
+data class HomeItem(
+    val name: String,
+    val author: String? = null,
+    val videoId: String? = null,
+    val playlistId: String? = null,
+    val browseId: String? = null,
+    val image: String? = null,
+    val params: String? = null,
+)
+
+data class HomeSection(
+    val key: String? = null,
+    val title: String? = null,
+    val items: List<HomeItem> = emptyList(),
+)
+
+data class HomeResult(
+    val loggedIn: Boolean,
+    val sections: List<HomeSection> = emptyList(),
+    val continuationTokens: List<String> = emptyList(),
+)

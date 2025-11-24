@@ -19,16 +19,31 @@ object PermissionManager {
      */
     fun hasStoragePermissions(context: Context): Boolean {
         return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+                // Android 13+ supports scoped storage fully; MANAGE_EXTERNAL_STORAGE is optional
+                Environment.isExternalStorageManager() ||
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.READ_MEDIA_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED ||
+                    hasScopedStorageAccess(context)
+            }
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
-                // Android 11+ - Check MANAGE_EXTERNAL_STORAGE
-                Environment.isExternalStorageManager()
+                // Android 11-12L: allow either MANAGE_EXTERNAL_STORAGE, legacy READ permission, or scoped access
+                Environment.isExternalStorageManager() ||
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.READ_EXTERNAL_STORAGE
+                    ) == PackageManager.PERMISSION_GRANTED ||
+                    hasScopedStorageAccess(context)
             }
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
-                // Android 10 - Check READ_EXTERNAL_STORAGE
+                // Android 10: scoped storage is available, but READ permission also works
                 ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.READ_EXTERNAL_STORAGE
-                ) == PackageManager.PERMISSION_GRANTED
+                ) == PackageManager.PERMISSION_GRANTED ||
+                    hasScopedStorageAccess(context)
             }
             else -> {
                 // Android 9 and below - Check both READ and WRITE
@@ -50,7 +65,8 @@ object PermissionManager {
     fun requestStoragePermissions(activity: Activity) {
         when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
-                // Android 11+ - Request MANAGE_EXTERNAL_STORAGE
+                // Android 11+ - Prefer scoped storage; only prompt for MANAGE access if absolutely necessary
+                if (hasScopedStorageAccess(activity)) return
                 val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                     data = Uri.parse("package:${activity.packageName}")
                 }
@@ -119,4 +135,17 @@ object PermissionManager {
     }
     
     const val STORAGE_PERMISSION_REQUEST_CODE = 1001
+
+    private fun hasScopedStorageAccess(context: Context): Boolean {
+        return runCatching {
+            val dir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+                ?: context.getExternalFilesDir(null)
+            if (dir != null) {
+                if (!dir.exists()) dir.mkdirs()
+                dir.canWrite()
+            } else {
+                false
+            }
+        }.getOrDefault(false)
+    }
 }

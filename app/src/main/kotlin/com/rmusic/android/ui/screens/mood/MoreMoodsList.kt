@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -29,7 +30,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEachIndexed
-import coil3.compose.AsyncImage
 import com.rmusic.android.LocalPlayerAwareWindowInsets
 import com.rmusic.android.R
 import com.rmusic.android.ui.components.ShimmerHost
@@ -48,18 +48,13 @@ import com.rmusic.core.ui.onOverlay
 import com.rmusic.core.ui.overlay
 import com.rmusic.core.ui.utils.px
 import com.rmusic.core.ui.utils.roundedShape
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.BrowseBody
-import com.rmusic.providers.innertube.requests.BrowseResult
-import com.rmusic.providers.innertube.requests.browse
+import com.rmusic.providers.intermusic.IntermusicProvider
 import com.valentinilk.shimmer.shimmer
 import kotlinx.collections.immutable.toImmutableList
 
-private const val DEFAULT_BROWSE_ID = "FEmusic_moods_and_genres"
-
 @Composable
 fun MoreMoodsList(
-    onMoodClick: (mood: Innertube.Mood.Item) -> Unit,
+    onMoodClick: (mood: IntermusicProvider.MoodItem) -> Unit,
     modifier: Modifier = Modifier,
     columns: Int = 2
 ) {
@@ -73,22 +68,24 @@ fun MoreMoodsList(
         .padding(top = 24.dp, bottom = 8.dp)
         .padding(endPaddingValues)
 
-    var moodsPage by persist<BrowseResult>(tag = "more_moods/list")
+    var moodSections by persist<List<IntermusicProvider.MoodSection>?>(tag = "more_moods/list")
+    var loadError by remember { mutableStateOf<Throwable?>(null) }
+
     val data by remember {
         derivedStateOf {
-            moodsPage?.items?.map {
-                it.title.orEmpty() to it.items.filterIsInstance<Innertube.Mood.Item>().toImmutableList()
+            moodSections?.map { section ->
+                section.title to section.items.toImmutableList()
             }
         }
     }
 
     LaunchedEffect(Unit) {
-        if (moodsPage != null) return@LaunchedEffect
+        if (moodSections != null || loadError != null) return@LaunchedEffect
 
-        moodsPage = Innertube
-            .browse(BrowseBody(browseId = DEFAULT_BROWSE_ID))
-            ?.also { it.exceptionOrNull()?.printStackTrace() }
-            ?.getOrNull()
+        val provider = IntermusicProvider.shared()
+        val result = provider.getMoods()
+        loadError = result.exceptionOrNull()
+        moodSections = result.getOrNull()
     }
 
     LazyVerticalGrid(
@@ -105,7 +102,7 @@ fun MoreMoodsList(
             contentType = 0,
             span = { GridItemSpan(columns) }
         ) {
-            if (moodsPage == null) HeaderPlaceholder(modifier = Modifier.shimmer())
+            if (data == null && loadError == null) HeaderPlaceholder(modifier = Modifier.shimmer())
             else Header(
                 title = stringResource(R.string.moods_and_genres),
                 modifier = Modifier.padding(endPaddingValues)
@@ -128,7 +125,7 @@ fun MoreMoodsList(
 
                 itemsIndexed(
                     items = moods,
-                    key = { j, item -> "item:$j,${item.key}" }
+                    key = { j, item -> "item:$j,${item.browseId ?: item.title}" }
                 ) { _, mood ->
                     ItemContainer(
                         alternative = true,
@@ -136,7 +133,9 @@ fun MoreMoodsList(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(4.dp)
-                            .clickable { mood.endpoint.browseId?.let { _ -> onMoodClick(mood) } }
+                            .clickable {
+                                if (mood.browseId != null) onMoodClick(mood)
+                            }
                     ) { centeredModifier ->
                         val (colorPalette, typography, thumbnailShapeCorners) = LocalAppearance.current
 
@@ -145,7 +144,6 @@ fun MoreMoodsList(
                                 .clip(thumbnailShapeCorners.roundedShape)
                                 .background(color = colorPalette.background1)
                         ) {
-                            // Mood items don't have thumbnails, use a color-based background
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -160,7 +158,7 @@ fun MoreMoodsList(
                             )
 
                             BasicText(
-                                text = mood.title ?: "Unknown Mood",
+                                text = mood.title,
                                 style = typography.m.semiBold.center.color(colorPalette.onOverlay),
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
@@ -174,7 +172,7 @@ fun MoreMoodsList(
             }
         }
 
-        if (moodsPage == null) item(
+        if (moodSections == null && loadError == null) item(
             key = "loading",
             contentType = 0,
             span = { GridItemSpan(columns) }
@@ -183,6 +181,22 @@ fun MoreMoodsList(
                 repeat(4) {
                     SongItemPlaceholder(thumbnailSize = Dimensions.thumbnails.song)
                 }
+            }
+        }
+
+        loadError?.let { error ->
+            item(
+                key = "error",
+                contentType = 0,
+                span = { GridItemSpan(columns) }
+            ) {
+                BasicText(
+                    text = error.localizedMessage ?: stringResource(R.string.error_loading_content),
+                    style = typography.m.semiBold,
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .padding(endPaddingValues)
+                )
             }
         }
     }

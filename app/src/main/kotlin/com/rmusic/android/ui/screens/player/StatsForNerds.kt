@@ -43,9 +43,7 @@ import com.rmusic.android.utils.medium
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.onOverlay
 import com.rmusic.core.ui.overlay
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.PlayerBody
-import com.rmusic.providers.innertube.requests.player
+import com.rmusic.providers.intermusic.IntermusicProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -87,20 +85,26 @@ fun StatsForNerds(
                 withContext(Dispatchers.IO) {
                     delay(2000)
 
-                    Innertube
-                        .player(PlayerBody(videoId = mediaId))
-                        ?.onSuccess { response ->
-                            response?.streamingData?.highestQualityFormat?.let { format ->
+                    val intermusicProvider = IntermusicProvider.shared()
+                    intermusicProvider
+                        .getPlayer(mediaId)
+                        .onSuccess { result ->
+                            val bestFormat = result?.streamingData?.formats
+                                ?.maxByOrNull { audio -> audio.bitrate ?: 0 }
+
+                            if (bestFormat != null) {
                                 Database.insert(mediaItem)
+                                val resolvedBitrate = bestFormat.bitrate
                                 Database.insert(
                                     Format(
                                         songId = mediaId,
-                                        itag = format.itag,
-                                        mimeType = format.mimeType,
-                                        bitrate = format.bitrate,
-                                        loudnessDb = response.playerConfig?.audioConfig?.normalizedLoudnessDb,
-                                        contentLength = format.contentLength,
-                                        lastModified = format.lastModified
+                                        itag = bestFormat.itag,
+                                        mimeType = bestFormat.mimeType,
+                                        bitrate = resolvedBitrate?.toLong(),
+                                        contentLength = bestFormat.contentLength?.toLongOrNull(),
+                                        lastModified = null,
+                                        loudnessDb = null,
+                                        url = bestFormat.url
                                     )
                                 )
                             }

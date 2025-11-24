@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -26,6 +27,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
+import coil3.compose.AsyncImage
+import com.rmusic.android.Database
 import com.rmusic.android.R
 import com.rmusic.android.models.Song
 import com.rmusic.android.preferences.AppearancePreferences
@@ -38,31 +41,47 @@ import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.shimmer
 import com.rmusic.core.ui.utils.px
 import com.rmusic.core.ui.utils.songBundle
-import com.rmusic.providers.innertube.Innertube
-import coil3.compose.AsyncImage
+import com.rmusic.providers.intermusic.pages.SongItem as InterSongItem
 
 @Composable
 fun SongItem(
-    song: Innertube.SongItem,
+    song: InterSongItem,
     thumbnailSize: Dp,
     modifier: Modifier = Modifier,
     showDuration: Boolean = true,
     clip: Boolean = true,
     isPlaying: Boolean = false,
     hideExplicit: Boolean = AppearancePreferences.hideExplicit
-) = SongItem(
-    modifier = modifier,
-    thumbnailUrl = song.thumbnail?.size(thumbnailSize.px),
-    title = song.info?.name,
-    authors = song.authors?.joinToString("") { it.name.orEmpty() },
-    duration = song.durationText,
-    explicit = song.explicit,
-    thumbnailSize = thumbnailSize,
-    showDuration = showDuration,
-    clip = clip,
-    isPlaying = isPlaying,
-    hideExplicit = hideExplicit
-)
+) {
+    val thumbnailSizePx = thumbnailSize.px
+    val fallbackDisplay = remember(song, thumbnailSize) {
+        SongItemDisplay(
+            thumbnailUrl = song.thumbnails.maxByOrNull { it.width ?: 0 }?.url?.thumbnail(thumbnailSizePx),
+            title = song.title,
+            authors = song.artists.joinToString(", ") { it.name },
+            duration = song.duration,
+            explicit = song.explicit
+        )
+    }
+    val resolvedDisplay = rememberSongItemDisplay(
+        songId = song.videoId,
+        thumbnailSize = thumbnailSize,
+        fallback = fallbackDisplay
+    )
+    SongItem(
+        modifier = modifier,
+        thumbnailUrl = resolvedDisplay.thumbnailUrl,
+        title = resolvedDisplay.title,
+        authors = resolvedDisplay.authors,
+        duration = resolvedDisplay.duration,
+        explicit = resolvedDisplay.explicit,
+        thumbnailSize = thumbnailSize,
+        showDuration = showDuration,
+        clip = clip,
+        isPlaying = isPlaying,
+        hideExplicit = hideExplicit
+    )
+}
 
 @Composable
 fun SongItem(
@@ -76,15 +95,30 @@ fun SongItem(
     isPlaying: Boolean = false,
     hideExplicit: Boolean = AppearancePreferences.hideExplicit
 ) {
+    val thumbnailSizePx = thumbnailSize.px
     val extras = remember(song) { song.mediaMetadata.extras?.songBundle }
+    val fallbackDisplay = remember(song, thumbnailSize, extras) {
+        SongItemDisplay(
+            thumbnailUrl = song.mediaMetadata.artworkUri.thumbnail(thumbnailSizePx)?.toString(),
+            title = song.mediaMetadata.title?.toString(),
+            authors = song.mediaMetadata.artist?.toString(),
+            duration = extras?.durationText,
+            explicit = extras?.explicit == true
+        )
+    }
+    val resolvedDisplay = rememberSongItemDisplay(
+        songId = song.mediaId,
+        thumbnailSize = thumbnailSize,
+        fallback = fallbackDisplay
+    )
 
     SongItem(
         modifier = modifier,
-        thumbnailUrl = song.mediaMetadata.artworkUri.thumbnail(thumbnailSize.px)?.toString(),
-        title = song.mediaMetadata.title?.toString(),
-        authors = song.mediaMetadata.artist?.toString(),
-        duration = extras?.durationText,
-        explicit = extras?.explicit == true,
+        thumbnailUrl = resolvedDisplay.thumbnailUrl,
+        title = resolvedDisplay.title,
+        authors = resolvedDisplay.authors,
+        duration = resolvedDisplay.duration,
+        explicit = resolvedDisplay.explicit,
         thumbnailSize = thumbnailSize,
         onThumbnailContent = onThumbnailContent,
         trailingContent = trailingContent,
@@ -156,13 +190,15 @@ private fun SongItem(
                     .background(colorPalette.background1)
                     .fillMaxSize()
             ) {
-                AsyncImage(
-                    model = thumbnailUrl,
-                    error = painterResource(id = R.drawable.ic_launcher_foreground),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (thumbnailUrl != null) {
+                    AsyncImage(
+                        model = thumbnailUrl,
+                        error = painterResource(id = R.drawable.ic_launcher_foreground),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 if (index != null) {
                     Box(
@@ -176,9 +212,9 @@ private fun SongItem(
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
-            }
 
-            onThumbnailContent?.invoke(this)
+                onThumbnailContent?.invoke(this)
+            }
         },
         modifier = modifier,
         trailingContent = trailingContent,
@@ -314,4 +350,31 @@ fun SongItemPlaceholder(
         TextPlaceholder()
         TextPlaceholder()
     }
+}
+
+private data class SongItemDisplay(
+    val thumbnailUrl: String?,
+    val title: String?,
+    val authors: String?,
+    val duration: String?,
+    val explicit: Boolean
+)
+
+@Composable
+private fun rememberSongItemDisplay(
+    songId: String?,
+    thumbnailSize: Dp,
+    fallback: SongItemDisplay
+): SongItemDisplay {
+    if (songId.isNullOrBlank()) return fallback
+    val songFlow = remember(songId) { Database.song(songId) }
+    val storedSong by songFlow.collectAsState(initial = null)
+    val song = storedSong ?: return fallback
+    return SongItemDisplay(
+        thumbnailUrl = song.thumbnailUrl?.thumbnail(thumbnailSize.px) ?: fallback.thumbnailUrl,
+        title = song.title.ifBlank { fallback.title.orEmpty() },
+        authors = song.artistsText ?: fallback.authors,
+        duration = song.durationText ?: fallback.duration,
+        explicit = song.explicit
+    )
 }

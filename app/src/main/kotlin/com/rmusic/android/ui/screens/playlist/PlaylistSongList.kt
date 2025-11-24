@@ -49,7 +49,6 @@ import com.rmusic.android.ui.items.SongItemPlaceholder
 import com.rmusic.android.utils.PlaylistDownloadIcon
 import com.rmusic.android.utils.PlaylistDownloadIconSpecific
 import com.rmusic.android.utils.asMediaItem
-import com.rmusic.android.utils.completed
 import com.rmusic.android.utils.enqueue
 import com.rmusic.android.utils.forcePlayAtIndex
 import com.rmusic.android.utils.forcePlayFromBeginning
@@ -58,9 +57,6 @@ import com.rmusic.compose.persist.persist
 import com.rmusic.core.ui.Dimensions
 import com.rmusic.core.ui.LocalAppearance
 import com.rmusic.core.ui.utils.isLandscape
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.BrowseBody
-import com.rmusic.providers.innertube.requests.playlistPage
 import com.rmusic.providers.intermusic.IntermusicProvider
 import com.rmusic.providers.intermusic.pages.PlaylistResult
 import com.valentinilk.shimmer.shimmer
@@ -82,28 +78,13 @@ fun PlaylistSongList(
     val context = LocalContext.current
     val menuState = LocalMenuState.current
 
-    var playlistPage by persist<Innertube.PlaylistOrAlbumPage?>("playlist/$browseId/playlistPage")
-    var ytPlaylist by persist<PlaylistResult?>("playlist/$browseId/ytPlaylist")
+    var playlistResult by persist<PlaylistResult?>("playlist/$browseId/playlistResult")
 
     LaunchedEffect(Unit) {
-        // Try Intermusic first (strip VL prefix if present)
-        if (ytPlaylist == null) {
+        if (playlistResult == null) {
             val provider = IntermusicProvider.shared()
-            if (provider.isLoggedIn()) {
-                val id = browseId.removePrefix("VL")
-                ytPlaylist = withContext(Dispatchers.IO) { provider.getPlaylist(id).getOrNull() }
-            }
-        }
-        if (ytPlaylist == null && (playlistPage == null || playlistPage?.songsPage?.continuation != null)) {
-            playlistPage = withContext(Dispatchers.IO) {
-                Innertube
-                    .playlistPage(BrowseBody(browseId = browseId, params = params))
-                    ?.completed(
-                        maxDepth = maxDepth ?: Int.MAX_VALUE,
-                        shouldDedup = shouldDedup
-                    )
-                    ?.getOrNull()
-            }
+            val id = browseId.removePrefix("VL")
+            playlistResult = withContext(Dispatchers.IO) { provider.getPlaylist(id, params).getOrNull() }
         }
     }
 
@@ -111,7 +92,7 @@ fun PlaylistSongList(
 
     if (isImportingPlaylist) TextFieldDialog(
         hintText = stringResource(R.string.enter_playlist_name_prompt),
-        initialTextInput = playlistPage?.title.orEmpty(),
+        initialTextInput = playlistResult?.title.orEmpty(),
         onDismiss = { isImportingPlaylist = false },
         onAccept = { text ->
             query {
@@ -120,12 +101,12 @@ fun PlaylistSongList(
                         Playlist(
                             name = text,
                             browseId = browseId,
-                            thumbnail = playlistPage?.thumbnail?.url
+                            thumbnail = playlistResult?.thumbnails?.firstOrNull()?.url
                         )
                     )
 
-                    playlistPage?.songsPage?.items
-                        ?.map(Innertube.SongItem::asMediaItem)
+                    playlistResult?.tracks
+                        ?.map { it.asMediaItem }
                         ?.onEach(Database::insert)
                         ?.mapIndexed { index, mediaItem ->
                             SongPlaylistMap(
@@ -140,23 +121,21 @@ fun PlaylistSongList(
     )
 
     val headerContent: @Composable () -> Unit = {
-        val title = ytPlaylist?.title ?: playlistPage?.title
+        val title = playlistResult?.title
         if (title == null) HeaderPlaceholder(modifier = Modifier.shimmer())
         else Header(title = title ?: stringResource(R.string.unknown)) {
             SecondaryTextButton(
                 text = stringResource(R.string.enqueue),
-                enabled = (ytPlaylist?.tracks?.isNotEmpty() == true) || (playlistPage?.songsPage?.items?.isNotEmpty() == true),
+                enabled = playlistResult?.tracks?.isNotEmpty() == true,
                 onClick = {
-                    val mediaItems = ytPlaylist?.tracks?.map { it.asMediaItem }
-                        ?: playlistPage?.songsPage?.items?.map(Innertube.SongItem::asMediaItem)
+                    val mediaItems = playlistResult?.tracks?.map { it.asMediaItem }
                     mediaItems?.let { binder?.player?.enqueue(it) }
                 }
             )
 
             Spacer(modifier = Modifier.weight(1f))
 
-            (ytPlaylist?.tracks?.map { it.asMediaItem }
-                ?: playlistPage?.songsPage?.items?.map(Innertube.SongItem::asMediaItem))
+            playlistResult?.tracks?.map { it.asMediaItem }
                 ?.let { mediaItems ->
                     PlaylistDownloadIconSpecific(
                         playlistId = browseId,
@@ -175,8 +154,7 @@ fun PlaylistSongList(
                 icon = R.drawable.share_social,
                 color = colorPalette.text,
                 onClick = {
-                    val url = playlistPage?.url
-                        ?: "https://music.youtube.com/playlist?list=${browseId.removePrefix("VL")}"
+                    val url = "https://music.youtube.com/playlist?list=${browseId.removePrefix("VL")}"
 
                     val sendIntent = Intent().apply {
                         action = Intent.ACTION_SEND
@@ -191,8 +169,8 @@ fun PlaylistSongList(
     }
 
     val thumbnailContent = adaptiveThumbnailContent(
-        isLoading = (playlistPage == null && ytPlaylist == null),
-        url = ytPlaylist?.thumbnails?.firstOrNull()?.url ?: playlistPage?.thumbnail?.url
+        isLoading = playlistResult == null,
+        url = playlistResult?.thumbnails?.firstOrNull()?.url
     )
 
     val lazyListState = rememberLazyListState()
@@ -200,7 +178,7 @@ fun PlaylistSongList(
     val (currentMediaId, playing) = playingSong(binder)
 
     // Precompute songs list (Intermusic preferred) so it's accessible for list + FAB
-    val songsForList = ytPlaylist?.tracks?.map { it.asMediaItem } ?: playlistPage?.songsPage?.items?.map(Innertube.SongItem::asMediaItem)
+    val songsForList = playlistResult?.tracks?.map { it.asMediaItem }?.toImmutableList()
 
     LayoutWithAdaptiveThumbnail(
         thumbnailContent = thumbnailContent,
@@ -223,7 +201,11 @@ fun PlaylistSongList(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         headerContent()
                         if (!isLandscape) thumbnailContent()
-                        PlaylistInfo(playlist = playlistPage)
+                        PlaylistInfo(
+                            description = playlistResult?.description,
+                            year = playlistResult?.year,
+                            otherInfo = playlistResult?.author
+                        )
                     }
                 }
                 if (songsForList != null) itemsIndexed(items = songsForList) { index, mediaItem ->
@@ -244,17 +226,6 @@ fun PlaylistSongList(
                                     songsForList.let { list ->
                                         binder?.stopRadio()
                                         binder?.player?.forcePlayAtIndex(list, index)
-                                        // Autoplay: iniciar radio desde el tema seleccionado
-                                        list.getOrNull(index)?.let { item ->
-                                            binder?.setupRadio(
-                                                com.rmusic.providers.innertube.models.NavigationEndpoint.Endpoint.Watch(
-                                                    videoId = item.mediaId,
-                                                    playlistId = null,
-                                                    params = null,
-                                                    playlistSetVideoId = null
-                                                )
-                                            )
-                                        }
                                     }
                                 }
                             ),
@@ -262,7 +233,7 @@ fun PlaylistSongList(
                     )
                 }
 
-                if (playlistPage == null && ytPlaylist == null) item(key = "loading") {
+                if (playlistResult == null) item(key = "loading") {
                     ShimmerHost(modifier = Modifier.fillParentMaxSize()) {
                         repeat(4) {
                             SongItemPlaceholder(thumbnailSize = Dimensions.thumbnails.song)
@@ -281,18 +252,6 @@ fun PlaylistSongList(
                             binder?.player?.forcePlayFromBeginning(
                                 songs.shuffled()
                             )
-                            // Iniciar radio desde la primera canción tras shuffle
-                            val first = songs.firstOrNull()?.mediaId
-                            if (first != null) {
-                                binder?.setupRadio(
-                                    com.rmusic.providers.innertube.models.NavigationEndpoint.Endpoint.Watch(
-                                        videoId = first,
-                                        playlistId = null,
-                                        params = null,
-                                        playlistSetVideoId = null
-                                    )
-                                )
-                            }
                         }
                     }
                 }

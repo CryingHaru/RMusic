@@ -89,9 +89,7 @@ import com.rmusic.core.ui.onOverlay
 import com.rmusic.core.ui.onOverlayShimmer
 import com.rmusic.core.ui.overlay
 import com.rmusic.core.ui.utils.dp
-import com.rmusic.providers.innertube.Innertube
-import com.rmusic.providers.innertube.models.bodies.NextBody
-import com.rmusic.providers.innertube.requests.lyrics
+import com.rmusic.providers.intermusic.IntermusicProvider
 import com.rmusic.providers.kugou.KuGou
 import com.rmusic.providers.lrclib.LrcLib
 import com.rmusic.providers.lrclib.LrcParser
@@ -206,9 +204,10 @@ fun Lyrics(
                             lyrics = null
                             error = false
 
-                            val fixed = currentLyrics?.fixed ?: Innertube
-                                .lyrics(NextBody(videoId = mediaId))
-                                ?.getOrNull()
+                            val intermusicProvider = IntermusicProvider.shared()
+                            val fixed = currentLyrics?.fixed ?: runCatching {
+                                intermusicProvider.getLyrics(mediaId).getOrNull()
+                            }.getOrNull()
                                 ?: LrcLib.bestLyrics(
                                     artist = artist,
                                     title = title,

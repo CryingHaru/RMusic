@@ -228,12 +228,12 @@ class MinimalHttpDataSource(
                 setRequestProperty("User-Agent", userAgent)
                 setRequestProperty("Accept-Encoding", "identity")
                 setRequestProperty("Connection", "keep-alive")
+                setRequestProperty("Cache-Control", "no-cache")
+                setRequestProperty("Pragma", "no-cache")
+                setRequestProperty("Priority", "u=1, i")
                 // Respetar headers Range del DataSpec, o construirlos si no están
                 val start = dataSpec.position
-                if (bytesToRead != C.LENGTH_UNSET.toLong()) {
-                    val end = start + bytesToRead - 1
-                    setRequestProperty("Range", "bytes=$start-$end")
-                } else if (start > 0) {
+                if (bytesToRead != C.LENGTH_UNSET.toLong() || start > 0) {
                     setRequestProperty("Range", "bytes=$start-")
                 }
                 // No añadir más headers (evitar Referer/Origin/etc.)
@@ -252,12 +252,12 @@ class MinimalHttpDataSource(
                     requestMethod = "GET"
                     setRequestProperty("User-Agent", userAgent)
                     setRequestProperty("Accept-Encoding", "identity")
-            setRequestProperty("Connection", "keep-alive")
+                    setRequestProperty("Connection", "keep-alive")
+                    setRequestProperty("Cache-Control", "no-cache")
+                    setRequestProperty("Pragma", "no-cache")
+                    setRequestProperty("Priority", "u=1, i")
                     val start = dataSpec.position
-                    if (bytesToRead != C.LENGTH_UNSET.toLong()) {
-                        val end = start + bytesToRead - 1
-                        setRequestProperty("Range", "bytes=$start-$end")
-                    } else if (start > 0) {
+                    if (bytesToRead != C.LENGTH_UNSET.toLong() || start > 0) {
                         setRequestProperty("Range", "bytes=$start-")
                     }
                 }

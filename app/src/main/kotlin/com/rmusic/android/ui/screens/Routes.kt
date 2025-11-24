@@ -15,13 +15,11 @@ import com.rmusic.android.ui.screens.album.AlbumScreen
 import com.rmusic.android.ui.screens.artist.ArtistScreen
 import com.rmusic.android.ui.screens.home.DownloadedAlbumScreen
 import com.rmusic.android.ui.screens.home.DownloadedArtistScreen
-import com.rmusic.android.ui.screens.pipedplaylist.PipedPlaylistScreen
 import com.rmusic.android.ui.screens.playlist.PlaylistScreen
 import com.rmusic.android.ui.screens.search.SearchScreen
 import com.rmusic.android.ui.screens.searchresult.SearchResultScreen
 import com.rmusic.android.ui.screens.settings.LogsScreen
 import com.rmusic.android.ui.screens.settings.SettingsScreen
-import com.rmusic.android.ui.screens.settings.IntermusicAuthScreen
 import com.rmusic.android.utils.toast
 import com.rmusic.compose.routing.Route0
 import com.rmusic.compose.routing.Route1
@@ -45,20 +43,32 @@ val artistRoute = Route1<String>("artistRoute")
 val builtInPlaylistRoute = Route1<BuiltInPlaylist>("builtInPlaylistRoute")
 val localPlaylistRoute = Route1<Long>("localPlaylistRoute")
 val logsRoute = Route0("logsRoute")
-val pipedPlaylistRoute = Route3<String, String, String>("pipedPlaylistRoute")
 val playlistRoute = Route4<String, String?, Int?, Boolean>("playlistRoute")
 val moodRoute = Route1<Mood>("moodRoute")
 val searchResultRoute = Route1<String>("searchResultRoute")
 val searchRoute = Route1<String>("searchRoute")
 val settingsRoute = Route0("settingsRoute")
-val intermusicAuthRoute = Route0("intermusicAuthRoute")
 val downloadedAlbumRoute = Route1<String>("downloadedAlbumRoute")
 val downloadedArtistRoute = Route1<String>("downloadedArtistRoute")
+val loginRoute = Route0("loginRoute")
 
 @Composable
 fun RouteHandlerScope.GlobalRoutes() {
     val context = LocalContext.current
     val binder = LocalPlayerServiceBinder.current
+
+    loginRoute {
+        com.rmusic.android.ui.screens.login.LoginScreen(
+            onLoginSuccess = { cookies, authUser, pageId, idToken ->
+                com.rmusic.providers.intermusic.IntermusicProvider.shared().login(cookies, authUser, pageId, idToken)
+                com.rmusic.android.preferences.DataPreferences.cookies = cookies
+                com.rmusic.android.preferences.DataPreferences.authUser = authUser
+                com.rmusic.android.preferences.DataPreferences.pageId = pageId ?: ""
+                com.rmusic.android.preferences.DataPreferences.idToken = idToken ?: ""
+                context.toast("Login successful (User: $authUser${if (pageId != null) ", Page: $pageId" else ""})")
+            }
+        )
+    }
 
     albumRoute { browseId ->
         AlbumScreen(browseId = browseId)
@@ -80,17 +90,6 @@ fun RouteHandlerScope.GlobalRoutes() {
         LogsScreen()
     }
 
-    pipedPlaylistRoute { apiBaseUrl, sessionToken, playlistId ->
-        PipedPlaylistScreen(
-            apiBaseUrl = runCatching { Url(apiBaseUrl) }.getOrNull()
-                ?: error("Invalid apiBaseUrl: $apiBaseUrl is not a valid Url"),
-            sessionToken = sessionToken,
-            playlistId = runCatching {
-                UUID.fromString(playlistId)
-            }.getOrNull() ?: error("Invalid playlistId: $playlistId is not a valid UUID")
-        )
-    }
-
     playlistRoute { browseId, params, maxDepth, shouldDedup ->
         PlaylistScreen(
             browseId = browseId,
@@ -102,10 +101,6 @@ fun RouteHandlerScope.GlobalRoutes() {
 
     settingsRoute {
         SettingsScreen()
-    }
-
-    intermusicAuthRoute {
-        IntermusicAuthScreen()
     }
 
     searchRoute { initialTextInput ->

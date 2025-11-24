@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import com.rmusic.android.R
@@ -121,11 +122,10 @@ fun HomeScreen(
 
         Content {
             val provider = remember { IntermusicProvider.shared() }
-            val authState by provider.getAuthStateFlow().collectAsState()
             var avatarUrl by remember { mutableStateOf<String?>(null) }
 
-            LaunchedEffect(authState) {
-                avatarUrl = if (authState.isLoggedIn) provider.getAvatarUrl(size = 88) else null
+            LaunchedEffect(Unit) {
+                avatarUrl = provider.getAvatarUrl(size = 88)
             }
 
             val binder = LocalPlayerServiceBinder.current
@@ -161,6 +161,7 @@ fun HomeScreen(
                         AsyncImage(
                             model = url,
                             contentDescription = null,
+                            contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .size(44.dp)
@@ -178,16 +179,6 @@ fun HomeScreen(
                     when (selectedIndex) {
                         0 -> saveableStateHolder.SaveableStateProvider(key = "home_quick_picks") {
                             QuickPicks(
-                                onAlbumClick = { albumRoute(it.key) },
-                                onArtistClick = { artistRoute(it.key) },
-                                onPlaylistClick = {
-                                    playlistRoute(
-                                        p0 = it.key,
-                                        p1 = null,
-                                        p2 = null,
-                                        p3 = it.channel?.name == "YouTube Music"
-                                    )
-                                },
                                 onSearchClick = onSearchClick
                             )
                         }
