@@ -53,3 +53,9 @@ test_audio.dart
 /.env
 /.env.*
 /tools
+
+# Keystore and Signing Secrets
+*.jks
+**/key.properties
+
+
