@@ -1,0 +1,55 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Background: Dark gradient -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F0C29" />
+      <stop offset="50%" stop-color="#302B63" />
+      <stop offset="100%" stop-color="#24243E" />
+    </linearGradient>
+
+    <!-- Gradients for the strokes -->
+    <!-- Vertical Line (Blue/Cyan) -->
+    <linearGradient id="line1" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00C9FF" />
+      <stop offset="100%" stop-color="#0052D4" />
+    </linearGradient>
+
+    <!-- Top Diagonal (Pink to Purple) -->
+    <linearGradient id="line2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF0080" />
+      <stop offset="100%" stop-color="#7928CA" />
+    </linearGradient>
+
+    <!-- Bottom Diagonal of the loop (Purple to Blue) -->
+    <linearGradient id="line3" x1="100%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#7928CA" />
+      <stop offset="100%" stop-color="#302B63" />
+    </linearGradient>
+
+    <!-- Leg Diagonal (Vibrant Purple/Magenta to Cyan) -->
+    <linearGradient id="line4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#B224EF" />
+      <stop offset="100%" stop-color="#00C9FF" />
+    </linearGradient>
+
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="12" dy="20" stdDeviation="16" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  
+
+  <!-- The R made of 4 thick geometric lines -->
+  <g stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow)">
+    <!-- Line 2: Top Diagonal (Upper Triangle) -->
+    <line x1="320" y1="220" x2="720" y2="400" stroke="url(#line2)" stroke-width="120" />
+    
+    <!-- Line 4: Leg (Moved behind Line 3, ending in a point) -->
+    <polygon points="289,631 351,529 770,850" fill="url(#line4)" />
+
+    <!-- Line 3: Bottom Diagonal (Lower Triangle) -->
+    <line x1="720" y1="400" x2="320" y2="580" stroke="url(#line3)" stroke-width="120" />
+  </g>
+</svg>
+
