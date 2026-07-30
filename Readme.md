@@ -1,62 +1,60 @@
 # RMusic
 
-Cliente de música para Android que reproduce contenido de YouTube Music y otras fuentes. Permite streaming, descargas offline y gestión de playlists.
+Cliente de música multiplataforma (Android, iOS, Linux) desarrollado en **Flutter**, que reproduce contenido de Innertube y otras fuentes con soporte para letras sincronizadas, descargas offline y personalización de interfaz.
 
 ## Funcionalidades
 
-- Reproducción de canciones y vídeos de YouTube Music
-- Reproducción de archivos locales
-- Reproducción en segundo plano
-- Caché de canciones para uso offline
-- Búsqueda de canciones, álbumes, artistas y playlists
-- Exploración por género/estado de ánimo
-- Importación de playlists de YouTube
-- Letras sincronizadas
-- Gestión de playlists locales y en la nube
-- Temas dinámicos (Material You)
-- Normalización de audio
-- Soporte para Android Auto
+- **Reproducción de Streaming:** Canciones, álbumes, artistas y playlists de YouTube Music.
+- **Reproducción en Segundo Plano:** Control multimedia nativo con `audio_service` y `media_kit`.
+- **Modo Offline & Descargas:** Gestión de biblioteca y persistencia local mediante base de datos SQLite (`drift`).
+- **Letras Sincronizadas:** Integración con LrcLib y traducción de letras.
+- **SponsorBlock:** Omisión automática de segmentos no musicales.
+- **Temas Dinámicos:** Soporte para Material You (`dynamic_color`) y personalización visual.
+- **Búsqueda Avanzada:** Sugerencias en tiempo real y filtrado de contenidos.
 
-## Instalación
+## Requisitos y Configuración
 
-Descarga el APK desde [Releases](../../releases) e instálalo en tu dispositivo (Android 7.0+).
+- **Flutter SDK:** 3.10+ (Dart SDK `^3.10.8`)
+- **Plataformas:** Android, iOS, Linux
 
-## Desarrollo
+### Comandos principales
 
-**Requisitos:**
-- Android Studio Ladybug+
-- JDK 22
-- Kotlin 2.1.20
-
-**Compilar:**
+Instalar dependencias:
 ```bash
-./gradlew assembleDebug
+flutter pub get
 ```
 
-**Lint:**
+Generar código (`drift`, `freezed`, `riverpod`):
 ```bash
-./gradlew detekt
+dart run build_runner build --delete-conflicting-outputs
 ```
 
-## Estructura del proyecto
+Ejecutar en desarrollo:
+```bash
+flutter run
+```
 
-| Módulo | Descripción |
-|--------|-------------|
-| `app/` | App principal y servicio de reproducción |
-| `providers/` | Conectores a servicios externos (Intermusic, Kugou, LrcLib, etc.) |
-| `core/` | Modelos de datos y componentes UI compartidos |
-| `compose/` | Utilidades de navegación y persistencia |
-| `download/` | Sistema de descargas |
+Compilar versión Release para Android:
+```bash
+flutter build apk --release
+```
+
+## Estructura del Proyecto
+
+```
+lib/
+├── core/          # Servicios de audio, tema y utilidades compartidas
+├── data/          # Base de datos local (Drift) y repositorios
+├── domain/        # Modelos de dominio y lógica de negocio
+├── providers/     # Conectores a APIs externas (Intermusic, LrcLib, SponsorBlock, etc.)
+└── presentation/  # UI (Pantallas, Widgets y gestores de estado Riverpod)
+```
 
 ## Créditos
 
-- **vfsfitvnm** – Autor original de ViMusic
-- **Huizengek** – Autor de ViTune (fork de ViMusic)
-- **sigma67** – Creador de [ytmusicapi](https://github.com/sigma67/ytmusicapi)
-- **ReVanced** – Equipo de [ReVanced](https://github.com/ReVanced)
 - **CryingHaru** – Mantenimiento de RMusic
+- **ViMusic / ViTune** – Inspiración inicial de la interfaz de música
 
 ## Licencia
 
 GPL-3.0. Ver [LICENSE](LICENSE).
-
