@@ -1,10 +1,11 @@
+import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:audio_service/audio_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:palette_generator/palette_generator.dart';
 import 'package:rmusic/providers/intermusic/intermusic_provider.dart';
 import 'package:rmusic/providers/sponsorblock/sponsorblock.dart';
 import 'package:rmusic/data/database/daos/music_dao.dart';
@@ -260,20 +261,47 @@ class _MyAppState extends ConsumerState<MyApp> {
         maxWidth: 128,
         maxHeight: 128,
       );
-      final palette = await PaletteGenerator.fromImageProvider(
-        imageProvider,
-        size: const Size(128, 128),
-        maximumColorCount: 8,
-      );
-      final seed =
-          palette.vibrantColor?.color ??
-          palette.dominantColor?.color ??
-          palette.lightVibrantColor?.color ??
-          palette.darkVibrantColor?.color ??
-          fallback.primary;
+      final seed = await _dominantColor(imageProvider) ?? fallback.primary;
       return ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark);
     } catch (_) {
       return fallback;
     }
   }
+}
+
+/// Extrae el color más saturado/vibrante de una imagen sin depender de palette_generator.
+Future<Color?> _dominantColor(ImageProvider provider) async {
+  final completer = Completer<ui.Image>();
+  final stream = provider.resolve(ImageConfiguration.empty);
+  late ImageStreamListener listener;
+  listener = ImageStreamListener(
+    (info, _) {
+      completer.complete(info.image);
+      stream.removeListener(listener);
+    },
+    onError: (e, _) {
+      completer.completeError(e);
+      stream.removeListener(listener);
+    },
+  );
+  stream.addListener(listener);
+
+  final image = await completer.future;
+  final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+  image.dispose();
+  if (byteData == null) return null;
+
+  final bytes = byteData.buffer.asUint8List();
+  Color? best;
+  double bestSat = 0;
+
+  // Samplea cada 16 píxeles para velocidad
+  for (int i = 0; i < bytes.length; i += 64) {
+    final hsl = HSLColor.fromColor(Color.fromARGB(255, bytes[i], bytes[i + 1], bytes[i + 2]));
+    if (hsl.saturation > bestSat && hsl.lightness > 0.1 && hsl.lightness < 0.9) {
+      bestSat = hsl.saturation;
+      best = Color.fromARGB(255, bytes[i], bytes[i + 1], bytes[i + 2]);
+    }
+  }
+  return best;
 }
