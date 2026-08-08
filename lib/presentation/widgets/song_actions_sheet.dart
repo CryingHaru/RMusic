@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:audio_service/audio_service.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/di/injection.dart';
 import '../../data/database/daos/music_dao.dart';
 import '../providers/music_providers.dart';
@@ -121,6 +122,14 @@ void showSongActionsSheet({
                       duration: const Duration(seconds: 2),
                     ),
                   );
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.share_rounded, color: scheme.primary),
+                title: const Text('Compartir enlace'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Share.share('https://music.youtube.com/watch?v=${item.id}');
                 },
               ),
             ],

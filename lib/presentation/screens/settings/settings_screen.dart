@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/di/injection.dart';
@@ -19,6 +20,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _SettingsSectionData('Apariencia', Icons.palette_outlined),
     _SettingsSectionData('Calidad y fuentes', Icons.library_music_outlined),
     _SettingsSectionData('Reproducción', Icons.graphic_eq),
+    _SettingsSectionData('Descargas', Icons.download_outlined),
     _SettingsSectionData('Cuenta y datos', Icons.account_circle_outlined),
     _SettingsSectionData('Acerca de', Icons.info_outline),
   ];
@@ -288,7 +290,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ];
 
-      case 3: // Cuenta y datos
+      case 3: // Descargas
+        return [
+          SwitchListTile(
+            title: const Text('Descarga automática (50%)'),
+            subtitle: const Text('Descargar canción automáticamente al alcanzar el 50% de reproducción'),
+            value: settings.autoSaveAt50,
+            onChanged: notifier.toggleAutoSaveAt50,
+          ),
+          buildTile(
+            title: 'Carpeta de descargas',
+            subtitle: settings.downloadPath ?? 'Por defecto: Música/Rmusic/canciones',
+            onTap: () => _showDownloadPathDialog(context, ref, settings),
+          ),
+        ];
+
+      case 4: // Cuenta y datos
         return [
           SwitchListTile(
             title: const Text('Guardar historial'),
@@ -308,7 +325,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ];
 
-      case 4: // Acerca de
+      case 5: // Acerca de
       default:
         return [
           const ListTile(
@@ -335,6 +352,85 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // ===========================================================================
   // HELPERS Y DIÁLOGOS
   // ===========================================================================
+
+  Future<void> _showDownloadPathDialog(
+    BuildContext context,
+    WidgetRef ref,
+    AppPreferences settings,
+  ) async {
+    final notifier = ref.read(settingsStateProvider.notifier);
+    final textController = TextEditingController(text: settings.downloadPath ?? '');
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Carpeta de descargas'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Selecciona o ingresa la carpeta donde se guardarán las canciones descargadas:',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: textController,
+                decoration: const InputDecoration(
+                  labelText: 'Ruta de la carpeta',
+                  hintText: '/storage/emulated/0/Music/Rmusic/canciones',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  try {
+                    final resultPath = await FilePicker.getDirectoryPath();
+                    if (resultPath != null && resultPath.isNotEmpty) {
+                      textController.text = resultPath;
+                    }
+                  } catch (e) {
+                    if (dialogContext.mounted) {
+                      ScaffoldMessenger.of(dialogContext).showSnackBar(
+                        SnackBar(content: Text('No se pudo abrir el explorador de archivos: $e')),
+                      );
+                    }
+                  }
+                },
+                icon: const Icon(Icons.folder_open),
+                label: const Text('Examinar carpetas'),
+              ),
+            ],
+          ),
+          actions: [
+            if (settings.downloadPath != null)
+              TextButton(
+                onPressed: () {
+                  notifier.setDownloadPath(null);
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text('Restablecer'),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final path = textController.text.trim();
+                notifier.setDownloadPath(path.isEmpty ? null : path);
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Guardar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   void _showRadioDialog<T>({
     required BuildContext context,

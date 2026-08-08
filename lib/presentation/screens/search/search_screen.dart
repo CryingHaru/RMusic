@@ -4,6 +4,7 @@ import 'package:audio_service/audio_service.dart';
 
 import '../../../core/utils/device_profile.dart';
 import '../../../core/utils/media_item_utils.dart';
+import '../../../core/utils/youtube_link_parser.dart';
 import '../../../providers/intermusic/intermusic_provider.dart';
 import '../../../providers/intermusic/models/intermusic_models.dart';
 import '../../providers/music_providers.dart';
@@ -74,6 +75,48 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     }
   }
 
+  void _handleSubmittedQuery(String val) {
+    final parsed = YouTubeLinkParser.parse(val);
+    if (parsed != null) {
+      switch (parsed.type) {
+        case YouTubeLinkType.video:
+          final item = MediaItem(
+            id: parsed.id,
+            title: 'Canción de enlace YouTube',
+            artist: 'YouTube',
+          );
+          ref.read(playbackControllerProvider).playSingle(item);
+          break;
+        case YouTubeLinkType.album:
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AlbumScreen(browseId: parsed.id),
+            ),
+          );
+          break;
+        case YouTubeLinkType.playlist:
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PlaylistScreen(browseId: parsed.id),
+            ),
+          );
+          break;
+        case YouTubeLinkType.artist:
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ArtistScreen(browseId: parsed.id),
+            ),
+          );
+          break;
+      }
+      return;
+    }
+    ref.read(searchQueryProvider.notifier).submitQuery(val);
+  }
+
   @override
   Widget build(BuildContext context) {
     final mediaSize = MediaQuery.of(context).size;
@@ -103,7 +146,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     controller: _controller,
                     compact: compact,
                     onChanged: (val) => ref.read(searchQueryProvider.notifier).updateQuery(val),
-                    onSubmitted: (val) => ref.read(searchQueryProvider.notifier).submitQuery(val),
+                    onSubmitted: _handleSubmittedQuery,
                   ),
                 ),
               ],

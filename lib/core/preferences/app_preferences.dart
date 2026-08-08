@@ -51,6 +51,7 @@ class AppPreferences {
   static const _keyIntermusicVisitorData = 'intermusic_visitor_data';
   static const _keyAutoSaveAt50 = 'auto_save_at_50';
   static const _keyPauseOnHeadsetUnplug = 'pause_on_headset_unplug';
+  static const _keyDownloadPath = 'download_path';
   static const _keySearchHistory = 'search_history';
 
   static const List<String> _defaultSponsorBlockCategories = ['sponsor', 'offtopicMusic', 'poiHighlight'];
@@ -116,11 +117,20 @@ class AppPreferences {
   List<String> get sponsorBlockCategories => _prefs.getStringList(_keySponsorBlockCategories) ?? _defaultSponsorBlockCategories;
   Future<void> setSponsorBlockCategories(List<String> value) => _prefs.setStringList(_keySponsorBlockCategories, value);
 
-  bool get autoSaveAt50 => _prefs.getBool(_keyAutoSaveAt50) ?? true;
+  bool get autoSaveAt50 => _prefs.getBool(_keyAutoSaveAt50) ?? false;
   Future<void> setAutoSaveAt50(bool value) => _prefs.setBool(_keyAutoSaveAt50, value);
 
   bool get pauseOnHeadsetUnplug => _prefs.getBool(_keyPauseOnHeadsetUnplug) ?? true;
   Future<void> setPauseOnHeadsetUnplug(bool value) => _prefs.setBool(_keyPauseOnHeadsetUnplug, value);
+
+  String? get downloadPath => _prefs.getString(_keyDownloadPath);
+  Future<void> setDownloadPath(String? value) async {
+    if (value == null || value.trim().isEmpty) {
+      await _prefs.remove(_keyDownloadPath);
+    } else {
+      await _prefs.setString(_keyDownloadPath, value.trim());
+    }
+  }
 
 
 
@@ -308,6 +318,7 @@ class SettingsState extends _$SettingsState {
   Future<void> setSponsorBlockCategories(List<String> v) => _update(() => state.setSponsorBlockCategories(v));
   Future<void> toggleAutoSaveAt50(bool v) => _update(() => state.setAutoSaveAt50(v));
   Future<void> togglePauseOnHeadsetUnplug(bool v) => _update(() => state.setPauseOnHeadsetUnplug(v));
+  Future<void> setDownloadPath(String? v) => _update(() => state.setDownloadPath(v));
 
   Future<void> setLyricsProvider(String v) => _update(() => state.setLyricsProvider(v));
   Future<void> setPlaybackClient(String v) => _update(() => state.setPlaybackClient(v));

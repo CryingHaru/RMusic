@@ -534,6 +534,23 @@ class DownloadService {
 
   Future<Directory> _downloadDirectory() async {
     final prefs = await SharedPreferences.getInstance();
+    final customPath = prefs.getString('download_path');
+
+    if (customPath != null && customPath.trim().isNotEmpty) {
+      final customDir = Directory(customPath.trim());
+      try {
+        if (!await customDir.exists()) {
+          await customDir.create(recursive: true);
+        }
+        final testFile = File(p.join(customDir.path, '.write_test_${DateTime.now().millisecondsSinceEpoch}'));
+        await testFile.writeAsString('test');
+        await testFile.delete();
+        return customDir;
+      } catch (e) {
+        _logger.w('Custom download directory un-writable ($customPath), using fallback.', error: e);
+      }
+    }
+
     final usePrivate = prefs.getBool('use_private_folder') ?? false;
 
     if (!usePrivate) {
